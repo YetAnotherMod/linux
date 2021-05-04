@@ -266,6 +266,25 @@
                 #thermal-sensor-cells = <0>;
         };
 
+        ccan0: c_can@01020000 {
+            compatible = "bosch,c_can";
+            reg = <0x01020000 0x8000>;
+            interrupt-parent = <&gic0>;
+            interrupts = <0 51 4>;
+            clocks = <&clock_can>;
+            sctl = <&sctl 0x30>;
+            status = "okay";
+        };
+
+        ccan1: c_can@01028000 {
+            compatible = "bosch,c_can";
+            reg = <0x01028000 0x8000>;
+            interrupt-parent = <&gic0>;
+            interrupts = <0 52 4>;
+            clocks = <&clock_can>;
+            sctl = <&sctl 0x34>;
+            status = "okay";
+        };
     };
 
     apbs1 {
