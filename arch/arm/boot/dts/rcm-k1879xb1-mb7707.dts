@@ -26,7 +26,7 @@
 
     memory {
         device_type = "memory";
-        reg = <0x40000000 0x8000000>;
+        reg = <0x40000000 0x8000000 0xc0000000 0x8000000>;
     };
 
 	reserved-memory {
@@ -37,6 +37,11 @@
 	    fb_reserved: framebuffer@45C00000 {
 		reg = <0x45C00000 0x2400000>;
 	    };
+
+		nmc_mem0: nmc_mem0 {
+			size = <0x1000000>;
+			alignment = <0x1000000>;
+		};
 	};
 
 	chosen {
@@ -158,25 +163,26 @@
 					#address-cells = <1>;
 					#size-cells = <1>;
 					status = "okay";
+
 					partition@0 {
 						label = "boot";
-						reg = <0x00000000 0x00040000>;
+						reg = <0x0 0x40000>;
 					};
-					partition@40000 {
+					partition@0x40000 {
 						label = "env";
-						reg = <0x00040000 0x00020000>;
+						reg = <0x40000 0x40000>;
 					};
-					partition@60000 {
-						label = "dtb";
-						reg = <0x00060000 0x00020000>;
+					partition@0x80000 {
+						label = "kernel_dtb";
+						reg = <0x80000 0x80000>;
 					};
-					partition@80000 {
+					partition@0x100000 {
 						label = "kernel";
-						reg = <0x0080000 0x00500000>;
+						reg = <0x100000 0x400000>;
 					};
-					partition@580000 {
+					partition@500000 {
 						label = "rootfs";
-						reg = <0x00580000 0x3FA80000>;
+						reg = <0x00500000 0x3FB00000>;
 					};
 				};
 			};
@@ -309,15 +315,9 @@
 			};
 
 			i2c0: i2c@1000 {
-				speed = <100000>;
-				clock-frequency = <54000000>;
 				status = "okay";
-				#address-cells = <1>;
-				#size-cells = <0>;
 				hdmi0: hdmi@39 {
-					compatible = "rcm,hdmi";
-					reg = <0x39>;
-					force-dvi = <1>;
+					status = "okay";
 				};
 			};
 
