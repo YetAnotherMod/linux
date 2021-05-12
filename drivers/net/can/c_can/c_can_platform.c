@@ -248,6 +248,37 @@ static const struct of_device_id c_can_of_table[] = {
 };
 MODULE_DEVICE_TABLE(of, c_can_of_table);
 
+#ifdef CONFIG_TARGET_1888BC048
+
+static int c_can_sctl_setup(struct device* pdev){
+
+	struct of_phandle_args args;
+	struct regmap* map;
+	struct device_node* np = pdev->of_node;
+	int ret;
+
+	ret = of_parse_phandle_with_fixed_args(np, "sctl", 1, 0, &args);
+	
+	if (ret < 0) {
+		dev_err(pdev, "failed to parse sctl node\n");
+		return ret;
+	}
+
+	map = syscon_node_to_regmap(args.np);
+
+	of_node_put(np);
+
+	if (IS_ERR(map)) {
+		dev_err(pdev, "failed to map SCTL\n");
+		return PTR_ERR(map);
+	}
+
+	ret = regmap_write(map, args.args[0], 7);
+
+	return ret;
+}
+#endif
+
 static int c_can_plat_probe(struct platform_device *pdev)
 {
 	int ret;
@@ -299,12 +330,20 @@ static int c_can_plat_probe(struct platform_device *pdev)
 		goto exit;
 	}
 
+#ifdef CONFIG_TARGET_1888BC048
+	if (ret = c_can_sctl_setup(&pdev->dev) != 0)
+		goto exit;
+#endif
+
 	priv = netdev_priv(dev);
 	switch (drvdata->id) {
 	case BOSCH_C_CAN:
 		priv->regs = reg_map_c_can;
 		switch (mem->flags & IORESOURCE_MEM_TYPE_MASK) {
 		case IORESOURCE_MEM_32BIT:
+#ifdef CONFIG_TARGET_1888BC048
+		case IORESOURCE_MEM_8BIT:
+#endif
 			priv->read_reg = c_can_plat_read_reg_aligned_to_32bit;
 			priv->write_reg = c_can_plat_write_reg_aligned_to_32bit;
 			priv->read_reg32 = c_can_plat_read_reg32;
