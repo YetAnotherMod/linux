@@ -258,6 +258,7 @@ static int c_can_sctl_setup(struct device* pdev){
 	int ret;
 
 	ret = of_parse_phandle_with_fixed_args(np, "sctl", 1, 0, &args);
+	
 	if (ret < 0) {
 		dev_err(pdev, "failed to parse sctl node\n");
 		return ret;
@@ -265,12 +266,16 @@ static int c_can_sctl_setup(struct device* pdev){
 
 	map = syscon_node_to_regmap(args.np);
 
+	of_node_put(np);
+
 	if (IS_ERR(map)) {
 		dev_err(pdev, "failed to map SCTL\n");
-		return ret;
+		return PTR_ERR(map);
 	}
 
-	return regmap_write(map, args.args[0], 7);
+	ret = regmap_write(map, args.args[0], 7);
+
+	return ret;
 }
 #endif
 
