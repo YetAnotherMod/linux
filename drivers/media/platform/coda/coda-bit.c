@@ -1310,6 +1310,10 @@ static int coda_start_encoding(struct coda_ctx *ctx)
 		value = 0;
 	}
 	coda_write(dev, value, CODA_CMD_ENC_SEQ_RC_PARA);
+	if (dev->devtype->product == CODA_980) {
+		coda_write(dev, 0, CODA980_CMD_ENC_SEQ_RC_PARA_2);
+		coda_write(dev, 0, CODA980_CMD_ENC_SEQ_RC_MAX_INTRA_SIZE);
+	}
 
 	coda_write(dev, ctx->params.vbv_size, CODA_CMD_ENC_SEQ_RC_BUF_SIZE);
 	coda_write(dev, ctx->params.intra_refresh,
