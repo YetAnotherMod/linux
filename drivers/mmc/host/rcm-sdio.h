@@ -36,7 +36,7 @@
 #define RMSDIO_CTRL_CRSR_BUS8       0x02
 #define RMSDIO_CTRL_CRSR_NO_FDRIVE     (1<<4)
 
-#define RMSDIO_CTRL_CRSR_SR        (1<<6)             
+#define RMSDIO_CTRL_CRSR_SR        (1<<6)
 #define RMSDIO_CTRL_CRSR_HR        (1<<7)
 #define RMSDIO_CTRL_CRSR_FD        (1<<4)
 
@@ -115,19 +115,18 @@
 #define RMSDIO_IRQ_CH1_DONE   (1<<1)
 #define RMSDIO_IRQ_CH0_DONE   (1<<0)
 
-#define RMSDIO_AXI_BURST_MASK   0xf
-#define RMSDIO_AXI_BURST_SHIFT  4
-#define RMSDIO_AXI_SIZE_MASK    0x7
-#define RMSDIO_AXI_SIZE_SHIFT   12
+#define RMSDIO_AXI_CH0_BURST_MASK   0xf
+#define RMSDIO_AXI_CH0_BURST_SHIFT  4
+#define RMSDIO_AXI_CH0_SIZE_MASK    0x7
+#define RMSDIO_AXI_CH0_SIZE_SHIFT   12
+
+#define RMSDIO_AXI_CH1_BURST_MASK   0xf
+#define RMSDIO_AXI_CH1_BURST_SHIFT  8
+#define RMSDIO_AXI_CH1_SIZE_MASK    0x7
+#define RMSDIO_AXI_CH1_SIZE_SHIFT   16
 
 #define RMSDIO_DMA_CH0      0x28
 #define RMSDIO_DMA_CH1      0x38
-
-#define RMSDIO_DCCR     0x00
-
-/* hardcoded tmplate. 4 bytes AXI width, 16 bytes bursts */
-#define RMSDIO_DCCR_TEMPLATE_R     0x20F00
-#define RMSDIO_DCCR_TEMPLATE_W     0x20F0
 
 #define RMSDIO_DCCR     0x00
 #define RMSDIO_DCSSAR   0x04

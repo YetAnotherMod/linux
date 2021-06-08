@@ -291,14 +291,9 @@ static inline void rmsdio_dma_xfer(struct rmsdio_host *host,
 	channel = (dir == DMA_TO_DEVICE) ? RMSDIO_DMA_CH0 : RMSDIO_DMA_CH1;
 	areg = (dir == DMA_TO_DEVICE) ? RMSDIO_DCSSAR : RMSDIO_DCDSAR;
 	tctl = 0x4 | buf;
-	tmpl = (dir == DMA_FROM_DEVICE) ? RMSDIO_DCCR_TEMPLATE_R : RMSDIO_DCCR_TEMPLATE_W; 
+	tmpl = (dir == DMA_TO_DEVICE) ? host->dccr0_flags : host->dccr1_flags;
 	tctl |= (dir == DMA_TO_DEVICE) ? 2 : 0;
-	if(channel == RMSDIO_DMA_CH0) {
-		rmsdio_write(RMSDIO_DCCR0, host->dccr0_flags);
-	}
-	else {
-		rmsdio_write(RMSDIO_DCCR1, host->dccr1_flags);
-	}
+
 	rmsdio_write(RMSDIO_TRAN_CTL, tctl);
 	rmsdio_write(channel + RMSDIO_DCDTR,  sz);
 	rmsdio_write(channel + areg, addr);  
@@ -681,7 +676,7 @@ static inline int rmsdio_read_flow(struct mmc_host *mmc, struct mmc_request *mrq
 			host->dma_target += data->blksz;
 		} else
 			break;
-		
+
 #ifdef DBG_BLOCKS			
 		if ( blocks != 1 )  
 			print_buf(host->cpu_target - 2 * data->blksz, data->blksz);
@@ -746,7 +741,7 @@ static void rmsdio_request(struct mmc_host * mmc, struct mmc_request * mrq)
 	MARK();
 	
 #ifdef DBG_CMD	
-	if ( data ) printk(KERN_INFO " >CMD: cmd=%d, resp= 0x%x, arg=0x%x [%d x %d]", 
+	if ( data ) printk(KERN_INFO " >CMD: cmd=%d, resp= 0x%x, arg=0x%x [%d x %d]",
 	                             cmd->opcode, mmc_resp_type(cmd), cmd->arg, data->blocks, data->blksz);
 	else        printk(KERN_INFO " >CMD: cmd=%d, resp= 0x%x, arg=0x%x", cmd->opcode, mmc_resp_type(cmd), cmd->arg);
 #endif	
@@ -809,9 +804,11 @@ static void rmsdio_request(struct mmc_host * mmc, struct mmc_request * mrq)
 
 	if ( data ) {  
 		if (data->flags & MMC_DATA_WRITE) {
+			dma_sync_single_for_cpu(host->dev, host->dma_addr, data->blocks * data->blksz, DMA_TO_DEVICE);
 			copied = sg_copy_to_buffer(data->sg, data->sg_len, 
 			                           host->buff,
 			                           data->blocks * data->blksz);
+			dma_sync_single_for_device(host->dev, host->dma_addr, data->blocks * data->blksz, DMA_TO_DEVICE);
 			if (copied != data->blocks * data->blksz) {
 				dev_err(host->dev,
 				        "cannot copy data from sg list\n");
@@ -844,10 +841,12 @@ static void rmsdio_request(struct mmc_host * mmc, struct mmc_request * mrq)
 
 			if ((wret > 0) &&
 			    ((data->flags & MMC_DATA_WRITE) == 0)) {
+				dma_sync_single_for_cpu(host->dev, host->dma_addr, data->blocks * data->blksz, DMA_FROM_DEVICE);
 				copied = sg_copy_from_buffer(data->sg,
 				                             data->sg_len, 
 				                             host->buff,
 				                             data->blocks * data->blksz);
+				dma_sync_single_for_device(host->dev, host->dma_addr, data->blocks * data->blksz, DMA_FROM_DEVICE);
 				if (copied != data->blocks * data->blksz) {
 					dev_err(host->dev,
 					        "cannot copy data to sg list\n");
@@ -1067,10 +1066,10 @@ static int rmsdio_bind(struct basis_device *device)
 
 	host->sdio_timeout = msecs_to_jiffies(host->sdio_timeout_ms);
 
-	host->dccr0_flags = (host->axi_awlen & RMSDIO_AXI_BURST_MASK) << RMSDIO_AXI_BURST_SHIFT;
-	host->dccr0_flags |= (host->axi_awsize & RMSDIO_AXI_SIZE_MASK) << RMSDIO_AXI_SIZE_SHIFT;
-	host->dccr1_flags = (host->axi_arlen & RMSDIO_AXI_BURST_MASK) << RMSDIO_AXI_BURST_SHIFT;
-	host->dccr1_flags |= (host->axi_arsize & RMSDIO_AXI_SIZE_MASK) << RMSDIO_AXI_SIZE_SHIFT;
+	host->dccr0_flags = (axi_awlen & RMSDIO_AXI_CH0_BURST_MASK) << RMSDIO_AXI_CH0_BURST_SHIFT;
+	host->dccr0_flags |= (axi_awsize & RMSDIO_AXI_CH0_SIZE_MASK) << RMSDIO_AXI_CH0_SIZE_SHIFT;
+	host->dccr1_flags = (axi_arlen & RMSDIO_AXI_CH1_BURST_MASK) << RMSDIO_AXI_CH1_BURST_SHIFT;
+	host->dccr1_flags |= (axi_arsize & RMSDIO_AXI_CH1_SIZE_MASK) << RMSDIO_AXI_CH1_SIZE_SHIFT;
 
 	pr_debug("rmsdio: maximum clock is %d Hz minimum is %d Hz\n", mmc->f_max, mmc->f_min);
 	host->sdio_irq_enabled = 0;
@@ -1302,7 +1301,7 @@ static int rmsdio_probe(struct platform_device *pdev)
 	mmc = mmc_alloc_host(sizeof(struct rmsdio_host), &pdev->dev);
 	if (!mmc) {
 		ret = -ENOMEM;
-		goto out;
+		goto error_release_resource;
 	}
 
 	STEP(3);
@@ -1318,29 +1317,33 @@ static int rmsdio_probe(struct platform_device *pdev)
 	mmc->caps = MMC_CAP_4_BIT_DATA | MMC_CAP_SDIO_IRQ;
 
 	mmc->max_blk_size = 512;
-	mmc->max_blk_count = 0xff; 
+	mmc->max_blk_count = 0xff;
 
-	mmc->max_segs = 1;
+	mmc->max_segs = mmc->max_blk_size * mmc->max_blk_count;
 	mmc->max_seg_size = mmc->max_blk_size * mmc->max_blk_count;
 	mmc->max_req_size = mmc->max_blk_size * mmc->max_blk_count;
 
 	host->sdio_timeout = msecs_to_jiffies(200); // 200 ms by default
 
 	clk = devm_clk_get(&pdev->dev, "mmc");
-	if (IS_ERR(clk)) 
-		return -ENODEV;
+	if (IS_ERR(clk)) {
+		ret = -ENODEV;
+		goto error_free_host;
+	}
 
 	clk_enable(clk);
 
 	host->base_clock = clk_get_rate(clk);
 
-	if (!host->base_clock)
-		return -EINVAL;
+	if (!host->base_clock) {
+		ret = -EINVAL;
+		goto error_free_host;
+	}
 
-	if(mmc_of_parse(mmc))
-	{
+	ret = mmc_of_parse(mmc);
+	if (ret != 0) {
 		pr_err("%s: unable to parse mmc definition\n", DRIVER_NAME);
-		goto out;
+		goto error_free_host;
 	}
 
 	if (np) {
@@ -1357,33 +1360,10 @@ static int rmsdio_probe(struct platform_device *pdev)
 				host->sdio_timeout = msecs_to_jiffies(val);
 	}
 
-	host->dccr0_flags = (axi_awlen & RMSDIO_AXI_BURST_MASK) << RMSDIO_AXI_BURST_SHIFT;
-	host->dccr0_flags |= (axi_awsize & RMSDIO_AXI_SIZE_MASK) << RMSDIO_AXI_SIZE_SHIFT;
-	host->dccr1_flags = (axi_arlen & RMSDIO_AXI_BURST_MASK) << RMSDIO_AXI_BURST_SHIFT;
-	host->dccr1_flags |= (axi_arsize & RMSDIO_AXI_SIZE_MASK) << RMSDIO_AXI_SIZE_SHIFT;	
-
-//	mmc->f_min = DIV_ROUND_UP(host->base_clock, 2*(RMSDIO_CLKDIV_MAX+1));
-//	if (np) {
-//		int val;
-//		if(of_property_read_u32(np, "min-frequency", &val) == 0)
-//		{
-//			printk(KERN_INFO "rmsdio: limit min speed to %d Hz", val);		
-//			mmc->f_min = val;
-//		}
-//	}
-
-//	if (np) {
-//		int val;
-//		if(of_property_read_u32(np, "max-frequency", &val) == 0)
-//		{
-//			printk(KERN_INFO "rmsdio: limit max speed to %d Hz", val);		
-//			mmc->f_max = val;
-//		}
-//	}
-//	else
-//	{
-//		mmc->f_max = host->base_clock;
-//	}
+	host->dccr0_flags = (axi_awlen & RMSDIO_AXI_CH0_BURST_MASK) << RMSDIO_AXI_CH0_BURST_SHIFT;
+	host->dccr0_flags |= (axi_awsize & RMSDIO_AXI_CH0_SIZE_MASK) << RMSDIO_AXI_CH0_SIZE_SHIFT;
+	host->dccr1_flags = (axi_arlen & RMSDIO_AXI_CH1_BURST_MASK) << RMSDIO_AXI_CH1_BURST_SHIFT;
+	host->dccr1_flags |= (axi_arsize & RMSDIO_AXI_CH1_SIZE_MASK) << RMSDIO_AXI_CH1_SIZE_SHIFT;
 
 	pr_debug("rmsdio: maximum clock is %d Hz minimum is %d Hz\n", mmc->f_max, mmc->f_min);
 	host->sdio_irq_enabled = 0;
@@ -1392,20 +1372,24 @@ static int rmsdio_probe(struct platform_device *pdev)
 	printk(KERN_INFO "rmsdio start is 0x%Lx, base is 0x%x\n", (long long) r->start, (uint) host->base);
 	if (!host->base) {
 		ret = -ENOMEM;
-		goto out;
+		goto error_free_host;
 	}
 
 #ifdef CONFIG_1888TX018
 	pdev->dev.archdata.dma_offset = - (pdev->dev.dma_pfn_offset << PAGE_SHIFT); /* before v5.5 it was: set_dma_offset(&pdev->dev, - (pdev->dev.dma_pfn_offset << PAGE_SHIFT)); */
 #endif
 
-	host->buff = dma_alloc_coherent(&pdev->dev, mmc->max_req_size,
-	                                &host->dma_addr, GFP_KERNEL);
-	if (!host->buff) {
-		dev_err(&pdev->dev,
-		        "Failed to allocate DMA-coherent memory (%u bytes).\n",
-		        mmc->max_req_size);
-		goto out;
+	host->buff = kmalloc(mmc->max_req_size, GFP_KERNEL | GFP_DMA);
+	if (host->buff == NULL) {
+		dev_err(&pdev->dev, "Failed to allocate buffer\n");
+		ret = -ENOMEM;
+		goto error_iounmap;
+	}
+	host->dma_addr = dma_map_single(&pdev->dev, host->buff, mmc->max_req_size, DMA_BIDIRECTIONAL);
+	ret = dma_mapping_error(&pdev->dev, host->dma_addr);
+	if (ret != 0) {
+		dev_err(&pdev->dev, "Failed to map buffer\n");
+		goto error_free_buff;
 	}
 
 	STEP(4);
@@ -1418,7 +1402,7 @@ static int rmsdio_probe(struct platform_device *pdev)
 		LIGHT();
 		pr_err("%s: cannot assign irq %d\n", DRIVER_NAME, irq);
 		LIGHT();
-		goto out;
+		goto error_unmap_buff;
 	}
 
 	STEP(5);
@@ -1426,90 +1410,42 @@ static int rmsdio_probe(struct platform_device *pdev)
 	host->irq = irq;
 	pr_debug("rmsdio: Using irq %d\n", irq);
 
-/* card detect and write protect proceeded now by mmc_of_parse so following functionlaity not needed anymore */
-
-//	if (rmsd_data->gpio_card_detect) {
-//		ret = gpio_request(rmsd_data->gpio_card_detect, "carddetect-gpio"/*DRIVER_NAME " cd"*/);
-//		// !!! ret = gpio_request_by_name(dev, "carddetect-gpio", 0, & rmsd_data->gpio_card_detect, GPIOD_IS_IN);
-//		pr_debug("rmsdio: gpio_card_detect: gpio_request: ret=%d\n", ret);
-//		if (ret == 0) {
-//			gpio_direction_input(rmsd_data->gpio_card_detect);
-//			irq = gpio_to_irq(rmsd_data->gpio_card_detect);
-//			ret = request_irq(irq, rmsdio_card_detect_irq,
-//					  IRQ_TYPE_EDGE_RISING | IRQ_TYPE_EDGE_FALLING,
-//					  DRIVER_NAME " cd", host);
-//			pr_debug("rmsdio: gpio_card_detect: request_irq: ret=%d\n", ret);
-//			if (ret == 0)
-//				host->gpio_card_detect =
-//					rmsd_data->gpio_card_detect;
-//			else
-//				gpio_free(rmsd_data->gpio_card_detect);
-//		}
-//	}
-	/*
-	   if (!host->gpio_card_detect) 
-	   mmc->caps |= MMC_CAP_NEEDS_POLL;
-	*/
-
-//	STEP(6);
-
-//	if (rmsd_data->gpio_write_protect) {
-//		ret = gpio_request(rmsd_data->gpio_write_protect,
-//				   DRIVER_NAME " wp");
-//		if (ret == 0) {
-//			gpio_direction_input(rmsd_data->gpio_write_protect);
-//			host->gpio_write_protect =
-//				rmsd_data->gpio_write_protect;
-//		}
-//	}
-
 	rmsdio_clean_isr(host, 0); /* Clean up anything */
 	platform_set_drvdata(pdev, mmc);
 	ret = mmc_add_host(mmc);
 	if (ret)
-		goto out;
+		goto error_free_irq;
 
 	/* Now we need to enable all in-host isrs. We'll use 
 	   added regs for fine-tuning */
-				    
+
 	STEP(7);
 
 	pr_notice("%s: %s driver initialized, ",
 		  mmc_hostname(mmc), DRIVER_NAME);
 
-/* card detect and write protect proceeded now by mmc_of_parse so following functionlaity not needed anymore */
-
-//	if (host->gpio_card_detect)
-//		printk(KERN_INFO "using GPIO %d for card detection\n",
-//		       host->gpio_card_detect);
-//	else
-//		printk(KERN_INFO "lacking card detect (fall back to polling)\n");
-	
 	host->dev->coherent_dma_mask=DMA_BIT_MASK(25);
 	printk(KERN_INFO "rmsdio becomes ready\n");
+
 	return 0;
-	
-out:
-	if (host) {
-		if (host->irq)
-			free_irq(host->irq, host);
-/* card detect and write protect proceeded now by mmc_of_parse so following functionlaity not needed anymore */
-//		if (host->gpio_card_detect) {
-//			free_irq(gpio_to_irq(host->gpio_card_detect), host);
-//			gpio_free(host->gpio_card_detect);
-//		}
-//		if (host->gpio_write_protect)
-//			gpio_free(host->gpio_write_protect);
-		if (host->buff)
-			dma_free_coherent(&pdev->dev, mmc->max_req_size,
-			                  host->buff, host->dma_addr);
-		if (host->base)
-			iounmap(host->base);
-	}
-	if (r)
-		release_resource(r);
-	if (mmc)
-		mmc_free_host(mmc);
+
+error_free_irq:
+	free_irq(host->irq, host);
+
+error_unmap_buff:
+	dma_unmap_single(&pdev->dev, host->dma_addr, mmc->max_req_size, DMA_BIDIRECTIONAL);
+
+error_free_buff:
+	kfree(host->buff);
+
+error_iounmap:
+	iounmap(host->base);
+
+error_free_host:
+	mmc_free_host(mmc);
+
+error_release_resource:
+	release_resource(r);
 
 	return ret;
 }
