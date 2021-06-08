@@ -1319,7 +1319,11 @@ static int rmsdio_probe(struct platform_device *pdev)
 	mmc->max_blk_size = 512;
 	mmc->max_blk_count = 0xff;
 
-	mmc->max_segs = mmc->max_blk_size * mmc->max_blk_count;
+	// do not set mmc->max_segs to big because of the code during request preparation:
+	// struct scatterlist *sg;
+	// sg = kmalloc_array(sg_len, sizeof(*sg), gfp);
+	mmc->max_segs = PAGE_SIZE / sizeof(struct scatterlist); // about 170
+
 	mmc->max_seg_size = mmc->max_blk_size * mmc->max_blk_count;
 	mmc->max_req_size = mmc->max_blk_size * mmc->max_blk_count;
 
@@ -1424,7 +1428,6 @@ static int rmsdio_probe(struct platform_device *pdev)
 	pr_notice("%s: %s driver initialized, ",
 		  mmc_hostname(mmc), DRIVER_NAME);
 
-	host->dev->coherent_dma_mask=DMA_BIT_MASK(25);
 	printk(KERN_INFO "rmsdio becomes ready\n");
 
 	return 0;
