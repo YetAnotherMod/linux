@@ -128,32 +128,6 @@
 		reg = <0x00000000 0x00000000 0x00000000 0x00000000>; // should be mofified at startup
 	};
 
-	// HDMI channel 0 for DRM drivers
-	hdmi-out0 {
-		status = "disabled";
-		compatible = "hdmi-connector";
-		type = "a";
-
-		port {
-			hdmi_con0: endpoint {
-				remote-endpoint = <&adv7513_0_out>;
-			};
-		};
-	};
-
-	// HDM channel 1 for DRM drivers
-	hdmi-out1 {
-		status = "disabled";
-		compatible = "hdmi-connector";
-		type = "a";
-
-		port {
-			hdmi_con1: endpoint {
-				remote-endpoint = <&adv7513_1_out>;
-			};
-		};
-	};
-
 	lsif0clock: lsif0clock@100M {
 		#clock-cells = <0>;
 		compatible = "fixed-clock";
@@ -718,7 +692,6 @@
 				};
 			};
 
-
 			i2c0: i2c@0x3C05A000 {
 				status = "disabled";
 				compatible = "rcm,i2cmst";
@@ -730,124 +703,6 @@
 				reg-io-width = <4>;
 				interrupt-parent = <&MPIC>;
 				interrupts = <99 0>;	// IRQ_TYPE_EDGE_RISING
-
-				// HDMI channel 0 for fbdev and v4l2 drivers
-				adv7513_0: adv7513@39 {
-					status = "disabled";
-					compatible = "rcm,rcm-adv7513";
-					reg = <0x39>;
-				};
-
-				// HDMI channel 1 for fbdev and v4l2 drivers
-				adv7513_1: adv7513@3d {
-					status = "disabled";
-					compatible = "rcm,rcm-adv7513";
-					reg = <0x3D>;
-				};
-
-				// HDMI channel 0 for DRM drivers
-				hdmi@39 {
-					status = "disabled";
-					compatible = "adi,adv7513";
-					reg = <0x39>, <0x29>, <0x49>, <0x59>;
-					reg-names = "main", "cec", "edid", "packet";
-
-					adi,input-depth = <8>;
-					adi,input-colorspace = "yuv444";
-					adi,input-clock = "1x";
-					adi,input-style = <1>;
-					adi,input-justification = "evenly";
-
-					ports {
-						#address-cells = <1>;
-						#size-cells = <0>;
-
-						port@0 {
-							reg = <0>;
-							adv7513_0_in: endpoint {
-								remote-endpoint = <&vdu_out_rgb0>;
-							};
-						};
-
-						port@1 {
-							reg = <1>;
-							adv7513_0_out: endpoint {
-								remote-endpoint = <&hdmi_con0>;
-							};
-						};
-					};
-				};
-
-				// HDMI channel 1 for DRM drivers
-				hdmi@3d {
-					status = "disabled";
-					compatible = "adi,adv7513";
-					reg = <0x3d>, <0x2d>, <0x6d>, <0x5d>;
-					reg-names = "main", "cec", "edid", "packet";
-
-					adi,input-depth = <8>;
-					adi,input-colorspace = "yuv444";
-					adi,input-clock = "1x";
-					adi,input-style = <1>;
-					adi,input-justification = "evenly";
-
-					ports {
-						#address-cells = <1>;
-						#size-cells = <0>;
-
-						port@0 {
-							reg = <0>;
-							adv7513_1_in: endpoint {
-								remote-endpoint = <&vdu_out_rgb1>;
-							};
-						};
-
-						port@1 {
-							reg = <1>;
-							adv7513_1_out: endpoint {
-								remote-endpoint = <&hdmi_con1>;
-							};
-						};
-					};
-				};
-
-
-				// HDMI graber, channel 0
-				adv7611_0: adv7611@4c {
-					default-input = <0>;
-					sample-alsb = <1>;
-					compatible = "adi,adv7611";
-					reg = <0x4c>, <0x42>, <0x40>, <0x3e>, <0x38>, <0x3c>, <0x26>, <0x32>, <0x36>, <0x34>, <0x30>, <0x22>, <0x24>;
-					reg-names = "main",  "avlink","cec","infoframe","esdp", "dpp", "afe", "rep", "edid", "hdmi", "test", "cp", "vdp";
-				    #address-cells = <1>;
-					#size-cells = <0>;
-					port@0 {
-						reg = <0>;
-						hdmi: endpoint_0 {
-							hsync-active=<1>;
-							vsync-active=<1>;
-							pclk-sample=<1>;
-						};
-					};
-				};
-
-				// HDMI graber, channel 1
-				adv7611_1: adv7611@4d {
-					default-input = <0>;
-					compatible = "adi,adv7611";
-					reg = <0x4d>, <0x43>, <0x41>, <0x3f>, <0x39>, <0x3d>, <0x27>, <0x33>, <0x37>, <0x35>, <0x31>, <0x23>, <0x25>;
-					reg-names = "main",  "avlink","cec","infoframe","esdp", "dpp", "afe", "rep", "edid", "hdmi", "test", "cp", "vdp";
-				    #address-cells = <1>;
-					#size-cells = <0>;
-					port@0 {
-						reg = <0>;
-						hdmi_1: endpoint_1 {
-							hsync-active=<1>;
-							vsync-active=<1>;
-							pclk-sample=<1>;
-						};
-					};
-				};
 			};
 
 			i2c1: i2c@0x3C05B000 {
@@ -1169,16 +1024,6 @@
 				interrupts = <120 2>; // active high level-sensitive
 				vdu-index = <1>;
 				crg-control = <&crg_vdu>;
-				output-color-space = "yuv444";
-				max-width = <1280>;
-				max-height = <720>;
-				ports {
-					port@0 {
-						vdu_out_rgb0: endpoint@0 {
-							remote-endpoint = <&adv7513_0_in>;
-						};
-					};
-				};
 			};
 
 			// HDMI channel 1 for DRM drivers (actually VDU index 0)
@@ -1190,16 +1035,6 @@
 				interrupts = <117 2>; // active high level-sensitive
 				vdu-index = <0>;
 				crg-control = <&crg_vdu>;
-				output-color-space = "yuv444";
-				max-width = <1280>;
-				max-height = <720>;
-				ports {
-					port@0 {
-						vdu_out_rgb1: endpoint@0 {
-							remote-endpoint = <&adv7513_1_in>;
-						};
-					};
-				};
 			};
 
 			// VPU for user space driver

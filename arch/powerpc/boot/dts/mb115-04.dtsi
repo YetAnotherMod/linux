@@ -213,11 +213,31 @@
 			// HDMI channel 0 for DRM drivers (actually VDU index 1)
 			vdu0_drm: vdu@38013000 {
 				status = "ok";
+				output-color-space = "yuv444";
+				max-width = <1280>;
+				max-height = <720>;
+				ports {
+					port@0 {
+						vdu_out_rgb0: endpoint@0 {
+							remote-endpoint = <&adv7513_0_in>;
+						};
+					};
+				};
 			};
 
 			// HDMI channel 1 for DRM drivers (actually VDU index 0)
 			vdu1_drm: vdu@38011000 {
 				status = "ok";
+				output-color-space = "yuv444";
+				max-width = <1280>;
+				max-height = <720>;
+				ports {
+					port@0 {
+						vdu_out_rgb1: endpoint@0 {
+							remote-endpoint = <&adv7513_1_in>;
+						};
+					};
+				};
 			};
 		};
 	};
