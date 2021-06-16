@@ -1,0 +1,28 @@
+/*
+ * Device Tree Overlay example for RCM MB115.03 extention board (Ethernet)
+ *
+ * Copyright (C) 2020 MIR
+ *	Mikhail.Petrov@mir.dev
+ *
+ * SPDX-License-Identifier: GPL-2.0+
+ */
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target-path = "/plb/lsif/greth0@C002A000";
+		__overlay__ {
+			status = "ok";
+			mac-address = [ EC 17 66 77 05 03 ];
+		};
+	};
+
+	fragment@1 {
+		target-path = "/plb/lsif/greth1@C003A000";
+		__overlay__ {
+			status = "ok";
+			mac-address = [ EC 17 66 77 05 04 ];
+		};
+	};
+};
