@@ -1,0 +1,78 @@
+/*
+ * Device Tree Source for RCM MT43-02 board (Ethernet)
+ *
+ * This file is licensed under the terms of the GNU General Public
+ * License version 2.  This program is licensed "as is" without
+ * any warranty of any kind, whether express or implied.
+ */
+
+/ {
+	apbf0 {
+		mgeth0: mgeth0@0x01014000 {
+			status = "ok";
+			// mac-address = [ec 17 66 64 08 10];
+			phys = <&sgmiiphy>;
+			phy-handle = <&phy0>;
+			phy-mode = "sgmii";
+		};
+
+		mgeth1: mgeth1@0x01015000 {
+			status = "ok";
+			phys = <&sgmiiphy>;
+			phy-handle = <&phy1>;
+			phy-mode = "sgmii";
+		};
+
+		mgeth2: mgeth2@0x01016000 {
+			status = "ok";
+			phys = <&sgmiiphy>;
+			phy-handle = <&phy2>;
+			phy-mode = "sgmii";
+		};
+
+		mgeth3: mgeth3@0x01017000 {
+			status = "ok";
+			phys = <&sgmiiphy>;
+			phy-handle = <&phy3>;
+			phy-mode = "sgmii";
+		};
+	};
+
+	apbs2 {
+		mdio0: mdio0@0x01080000 {
+			status = "ok";
+
+			phy0: ethernet-phy@0 {
+				ti,fifo-depth = <DP83867_PHYCR_FIFO_DEPTH_4_B_NIB>;
+			};
+		};
+
+		mdio1: mdio0@0x01081000 {
+			status = "ok";
+
+			phy1: ethernet-phy@0 {
+				ti,fifo-depth = <DP83867_PHYCR_FIFO_DEPTH_4_B_NIB>;
+			};
+		};
+
+		mdio2: mdio0@0x01082000 {
+			status = "ok";
+
+			phy2: ethernet-phy@0 {
+				ti,fifo-depth = <DP83867_PHYCR_FIFO_DEPTH_4_B_NIB>;
+			};
+		};
+
+		mdio3: mdio0@0x01083000 {
+			status = "ok";
+
+			phy3: ethernet-phy@0 {
+				ti,fifo-depth = <DP83867_PHYCR_FIFO_DEPTH_4_B_NIB>;
+			};
+		};
+
+		sgmiiphy: sgmiphy@0x01086000 {
+			status = "ok";
+		};
+	};
+};
