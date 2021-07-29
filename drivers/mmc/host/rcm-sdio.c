@@ -804,11 +804,15 @@ static void rmsdio_request(struct mmc_host * mmc, struct mmc_request * mrq)
 
 	if ( data ) {  
 		if (data->flags & MMC_DATA_WRITE) {
+#ifndef CONFIG_BASIS_PLATFORM
 			dma_sync_single_for_cpu(host->dev, host->dma_addr, data->blocks * data->blksz, DMA_TO_DEVICE);
+#endif
 			copied = sg_copy_to_buffer(data->sg, data->sg_len, 
 			                           host->buff,
 			                           data->blocks * data->blksz);
+#ifndef CONFIG_BASIS_PLATFORM
 			dma_sync_single_for_device(host->dev, host->dma_addr, data->blocks * data->blksz, DMA_TO_DEVICE);
+#endif
 			if (copied != data->blocks * data->blksz) {
 				dev_err(host->dev,
 				        "cannot copy data from sg list\n");
@@ -841,12 +845,16 @@ static void rmsdio_request(struct mmc_host * mmc, struct mmc_request * mrq)
 
 			if ((wret > 0) &&
 			    ((data->flags & MMC_DATA_WRITE) == 0)) {
+#ifndef CONFIG_BASIS_PLATFORM
 				dma_sync_single_for_cpu(host->dev, host->dma_addr, data->blocks * data->blksz, DMA_FROM_DEVICE);
+#endif
 				copied = sg_copy_from_buffer(data->sg,
 				                             data->sg_len, 
 				                             host->buff,
 				                             data->blocks * data->blksz);
+#ifndef CONFIG_BASIS_PLATFORM
 				dma_sync_single_for_device(host->dev, host->dma_addr, data->blocks * data->blksz, DMA_FROM_DEVICE);
+#endif
 				if (copied != data->blocks * data->blksz) {
 					dev_err(host->dev,
 					        "cannot copy data to sg list\n");
@@ -1057,7 +1065,11 @@ static int rmsdio_bind(struct basis_device *device)
 	mmc->max_blk_size = 512;
 	mmc->max_blk_count = 0xff; 
 
-	mmc->max_segs = 1;
+	// do not set mmc->max_segs to big because of the code during request preparation:
+	// struct scatterlist *sg;
+	// sg = kmalloc_array(sg_len, sizeof(*sg), gfp);
+	mmc->max_segs = PAGE_SIZE / sizeof(struct scatterlist); // about 170
+
 	mmc->max_seg_size = mmc->max_blk_size * mmc->max_blk_count;
 	mmc->max_req_size = mmc->max_blk_size * mmc->max_blk_count;
 
@@ -1066,10 +1078,10 @@ static int rmsdio_bind(struct basis_device *device)
 
 	host->sdio_timeout = msecs_to_jiffies(host->sdio_timeout_ms);
 
-	host->dccr0_flags = (axi_awlen & RMSDIO_AXI_CH0_BURST_MASK) << RMSDIO_AXI_CH0_BURST_SHIFT;
-	host->dccr0_flags |= (axi_awsize & RMSDIO_AXI_CH0_SIZE_MASK) << RMSDIO_AXI_CH0_SIZE_SHIFT;
-	host->dccr1_flags = (axi_arlen & RMSDIO_AXI_CH1_BURST_MASK) << RMSDIO_AXI_CH1_BURST_SHIFT;
-	host->dccr1_flags |= (axi_arsize & RMSDIO_AXI_CH1_SIZE_MASK) << RMSDIO_AXI_CH1_SIZE_SHIFT;
+	host->dccr0_flags = (host->axi_awlen & RMSDIO_AXI_CH0_BURST_MASK) << RMSDIO_AXI_CH0_BURST_SHIFT;
+	host->dccr0_flags |= (host->axi_awsize & RMSDIO_AXI_CH0_SIZE_MASK) << RMSDIO_AXI_CH0_SIZE_SHIFT;
+	host->dccr1_flags = (host->axi_arlen & RMSDIO_AXI_CH1_BURST_MASK) << RMSDIO_AXI_CH1_BURST_SHIFT;
+	host->dccr1_flags |= (host->axi_arsize & RMSDIO_AXI_CH1_SIZE_MASK) << RMSDIO_AXI_CH1_SIZE_SHIFT;
 
 	pr_debug("rmsdio: maximum clock is %d Hz minimum is %d Hz\n", mmc->f_max, mmc->f_min);
 	host->sdio_irq_enabled = 0;
