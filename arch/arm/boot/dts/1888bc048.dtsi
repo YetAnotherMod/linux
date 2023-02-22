@@ -33,6 +33,10 @@
 			reg = <0x0>;
 			device_type = "cpu";
 			compatible = "arm,cortex-a5";
+			d-cache-line-size=<32>;
+			d-cache-size=<32768>;
+			i-cache-line-size=<32>;
+			i-cache-size=<32768>;
 			next-level-cache = <&L2>;
 			clocks = <&clock_arm>;
 		};
@@ -467,11 +471,12 @@
 			vendor-id = /bits/ 16 <0x17cd>;
 			device-id = /bits/ 16 <0x0200>;
 			reg = <0x01058000 0x6000>,
-			      <0x70000000 0x00001000>,
-			      <0x40000000 0x40000000>;
+			      <0x40000000 0x00001000>,
+			      <0x40001000 0x3ffff000>;
 			reg-names = "reg", "cfg", "mem";
-			ranges = <0x02000000 0x0 0x00000000  0x40000000  0x0 0x01000000>/*,
-			         <0x01000000 0x0 0x60000000  0x60000000  0x0 0x00010000>*/;
+			ranges = </*0x01000000 0x0 0x40001000 0x40001000 0x0 0x00fff000*/
+			          0x02000000 0x0 0x41000000 0x41000000 0x0 0x1f000000
+			          0x43000000 0x0 0x60000000 0x60000000 0x0 0x20000000>;
 			#interrupt-cells = <0x1>;
 			interrupt-map = <0x0 0x0 0x0  0x1  &gic0  0x0 0x0 25 0x4
 			                 0x0 0x0 0x0  0x2  &gic0  0x0 0x0 26 0x4
@@ -479,6 +484,8 @@
 			                 0x0 0x0 0x0  0x4  &gic0  0x0 0x0 28 0x4>;
 			interrupt-map-mask = <0x0 0x0 0x0  0x7>;
 			msi-parent = <&msi>;
+			sctl_rst = <&sctl 0x400>;
+			sctl_mod = <&sctl 0x404>;
 			// phys = <&pcie_phy0>;
 			// phy-names = "pcie-phy";
 		};
@@ -706,10 +713,16 @@
 		L2: l2-cache-controller@0x01106000 {
 			status = "disabled";
 			compatible = "arm,pl310-cache";
+			interrupt-parent = <&gic0>;
+			interrupts = <0 61 4>;
 			reg = <0x01106000 0x1000>;
 			cache-unified;
 			cache-level = <2>;
-			// cache-size = <0x80000>;
+			cache-size = <0x40000>;
+			cache-sets = <1024>;
+			cache-line-size = <32>;
+			arm,tag-latency = <1 1 1>;
+			arm,data-latency = <1 1 1>;
 		};	
 	};
 };

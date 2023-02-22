@@ -456,6 +456,7 @@ config ARCH_RCM_ARM
 	select COMMON_CLK
 	select GENERIC_CLOCKEVENTS
 	select ARM_TIMER_SP804
+	select ARM_HAS_SG_CHAIN
 	select ARM_GIC
 	select ARM_AMBA
 	select CPU_V7
