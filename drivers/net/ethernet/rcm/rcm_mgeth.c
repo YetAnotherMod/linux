@@ -304,11 +304,11 @@ static void rcm_mgeth_adjust_link(struct net_device *netdev)
 		if (data->speed != phydev->speed) {
 			new_state = 1;
 			if (phydev->speed == 10)
-				ctrl = (ctrl & ~GENMASK(1,2));
+				ctrl = (ctrl & ~GENMASK(2,1));
 			else if (phydev->speed == 100)
-				ctrl = (ctrl & ~GENMASK(1,2)) | (1 << 1);
+				ctrl = (ctrl & ~GENMASK(2,1)) | (1 << 1);
 			else if (phydev->speed == 1000)
-				ctrl = (ctrl & ~GENMASK(1,2)) | (1 << 2);
+				ctrl = (ctrl & ~GENMASK(2,1)) | (1 << 2);
 			else
 				netdev_warn(netdev,
 				            "Speed (%d) is not 10/100/1000!\n",
@@ -662,6 +662,8 @@ static const struct net_device_ops rcm_mgeth_netdev_ops = {
 
 static const struct ethtool_ops rcm_mgeth_ethtool_ops = {
 	.get_link               = ethtool_op_get_link,
+	.get_link_ksettings	= phy_ethtool_get_link_ksettings,
+	.set_link_ksettings	= phy_ethtool_set_link_ksettings,
 };
 
 static const struct regmap_config rcm_mgeth_regmap_cfg_0 = {
