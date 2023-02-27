@@ -7,6 +7,8 @@
 #include <linux/of_address.h>
 #include <linux/of_pci.h>
 #include <linux/platform_device.h>
+#include <linux/of.h>
+#include <linux/of_platform.h>
 #include <linux/pm_runtime.h>
 
 #include "pcie-cadence.h"
@@ -21,7 +23,9 @@ static void __iomem *rcm_cdns_pci_map_bus(struct pci_bus *bus,
 	struct pci_host_bridge *bridge = pci_find_host_bridge(bus);
 	struct cdns_pcie_rc *rc = pci_host_bridge_priv(bridge);
 	struct cdns_pcie *pcie = &rc->pcie;
+	struct device_node *parent = pcie->dev->of_node, *child = NULL;
 	unsigned int busn = bus->number;
+	unsigned int fix_devfn = 0x00; // 00.0 to work around (for all up-steam ports)
 	u32 addr0, desc0;
 
 	u64 sz = 1ULL << fls64(resource_size(rc->cfg_res) - 1);
@@ -43,8 +47,12 @@ static void __iomem *rcm_cdns_pci_map_bus(struct pci_bus *bus,
 
 		return pcie->reg_base + (where & 0xfff);
 	}
+
+	// return NULL;
+
 	/* Check that the link is up */
 	if (!(cdns_pcie_readl(pcie, CDNS_PCIE_LM_BASE) & 0x1)) {
+#if 0 // I don't know why jiffies false
 		unsigned long end_jiffies;
 		u32 reg32;
 
@@ -52,18 +60,176 @@ static void __iomem *rcm_cdns_pci_map_bus(struct pci_bus *bus,
 		        __func__);
 
 		end_jiffies = jiffies + LINK_RETRAIN_TIMEOUT;
-		do {
+		do { // !!!dead loop???
 			reg32 = cdns_pcie_readl(pcie, CDNS_PCIE_LM_BASE);
 			if (reg32 & 0x1)
 				break;
+
 			udelay(1000);
 		} while (time_before(jiffies, end_jiffies));
 		
 		if (!(reg32 & 0x1))
 			return NULL;
+#else
+		unsigned long rep_cnt;
+		u32 reg32;
+
+		pr_warn("%s: link is down. It can be retraining. Wait \n",
+			__func__);
+
+		rep_cnt = 1000;
+		while (rep_cnt) {
+			udelay(1000);
+
+			reg32 = cdns_pcie_readl(pcie, CDNS_PCIE_LM_BASE);
+			if (reg32 & 0x1)
+				break;
+
+			rep_cnt--;
+		}
+
+
+		if (!(reg32 & 0x1))
+			return NULL;
+#endif
 	}
+
 	/* Clear AXI link-down status */
 	cdns_pcie_writel(pcie, CDNS_PCIE_AT_LINKDOWN, 0x0);
+
+	if (busn != (rc->bus_range->start + 1)) { // PCIe switch present (at least one)
+		unsigned int pri_bus, sec_bus, tmp_bus;
+		u32 val, cap;
+		int i, n, ret;
+
+		child = of_get_next_child(parent, child);
+		tmp_bus = rc->bus_range->start + 1;
+
+		while (child) {
+			addr0 = CDNS_PCIE_AT_OB_REGION_PCI_ADDR0_NBITS(nbits) |
+				CDNS_PCIE_AT_OB_REGION_PCI_ADDR0_DEVFN(fix_devfn) |
+				CDNS_PCIE_AT_OB_REGION_PCI_ADDR0_BUS(tmp_bus); // Bug: Fixed devfn of up-stream port
+			cdns_pcie_writel(pcie, CDNS_PCIE_AT_OB_REGION_PCI_ADDR0(0), addr0);
+
+			if (tmp_bus == (rc->bus_range->start + 1))
+				desc0 = CDNS_PCIE_AT_OB_REGION_DESC0_TYPE_CONF_TYPE0;
+			else
+				desc0 = CDNS_PCIE_AT_OB_REGION_DESC0_TYPE_CONF_TYPE1;
+
+			desc0 |= CDNS_PCIE_AT_OB_REGION_DESC0_HARDCODED_RID |
+				 CDNS_PCIE_AT_OB_REGION_DESC0_DEVFN(0); // Access to CSR of up-stream port
+			cdns_pcie_writel(pcie, CDNS_PCIE_AT_OB_REGION_DESC0(0), desc0);
+
+			val = readl(rc->cfg_base + 0x18);
+
+			pri_bus = (val >> 0x00) & 0xFF;
+			sec_bus = (val >> 0x08) & 0xFF;
+
+			if (pri_bus != tmp_bus)
+				return NULL;
+
+			ret = of_property_read_u32(child, "pri-bus", &val);
+			if (ret || (sec_bus != (rc->bus_range->start + val)))
+				return NULL;
+
+			n = of_property_count_u32_elems(child, "dev-num");
+			if (n <= 0)
+				return NULL;
+
+			if (sec_bus == busn) { // Bug: Fixed devfn of down-stream ports
+				for (i = 0; i < n; i++) {
+					ret = of_property_read_u32_index(child, "dev-num", i, &val);
+					if (ret)
+						return NULL;
+
+					if (devfn == val)
+						break;
+				}
+
+				if (i == n)
+					return NULL;
+
+				goto check_skip;
+			}
+
+			desc0 = CDNS_PCIE_AT_OB_REGION_DESC0_HARDCODED_RID |
+				CDNS_PCIE_AT_OB_REGION_DESC0_TYPE_CONF_TYPE1 |
+				CDNS_PCIE_AT_OB_REGION_DESC0_DEVFN(0); // Access to CSR of down-stream ports
+			cdns_pcie_writel(pcie, CDNS_PCIE_AT_OB_REGION_DESC0(0), desc0);
+
+			tmp_bus = sec_bus;
+
+			for (i = 0; i < n; i++) { // Find down-stream port
+				ret = of_property_read_u32_index(child, "dev-num", i, &val);
+				if (ret)
+					return NULL;
+
+				addr0 = CDNS_PCIE_AT_OB_REGION_PCI_ADDR0_NBITS(nbits) |
+					CDNS_PCIE_AT_OB_REGION_PCI_ADDR0_DEVFN(val) |
+					CDNS_PCIE_AT_OB_REGION_PCI_ADDR0_BUS(tmp_bus);
+				cdns_pcie_writel(pcie, CDNS_PCIE_AT_OB_REGION_PCI_ADDR0(0), addr0);
+
+				val = readl(rc->cfg_base + 0x18);
+
+				pri_bus = (val >> 0x00) & 0xFF;
+				sec_bus = (val >> 0x08) & 0xFF;
+
+				if (pri_bus != tmp_bus)
+					return NULL;
+
+				ret = of_property_read_u32_index(child, "sec-bus", i, &val);
+				if (ret || (sec_bus != (rc->bus_range->start + val)))
+					return NULL;
+					
+				ret = of_property_read_u32_index(child, "sub-bus", i, &val);
+				if (ret || ((busn == sec_bus) && (val == 0)))
+					return NULL;
+
+				if ((busn >= sec_bus) && (busn <= (rc->bus_range->start + val)))
+					break;
+			}
+
+			if (sec_bus != busn) { // More one PCIe Switch
+				tmp_bus = sec_bus;
+				child = of_get_next_child(parent, child);
+
+				continue;
+			}
+
+			cap = readl(rc->cfg_base + 0x34) & 0xFF;
+
+			while (cap != 0x00) {
+				unsigned int tmp;
+				int id;
+
+				tmp = readl(rc->cfg_base + cap) & 0xFFFF;
+
+				id = tmp & 0xFF;
+				if (id == 0x10) // PCIe capabilities
+					break;
+
+				cap = (tmp >> 8) & 0xFF;
+			}
+
+			if (cap == 0x00)
+				return NULL;
+
+			if (readl(rc->cfg_base + cap + 0x0C) & (1 << 20))
+				val = readl(rc->cfg_base + cap + 0x10) & (1 << 29); // Data Link Active
+			else
+				val = readl(rc->cfg_base + cap + 0x18) & (1 << 22); // Slot Device Present
+
+			if (!val)
+				return NULL;
+
+			break;
+		}
+
+		if (!child)
+			return NULL;
+	}
+
+check_skip:
 
 	/* Update Output registers for AXI region 0. */
 	addr0 = CDNS_PCIE_AT_OB_REGION_PCI_ADDR0_NBITS(nbits) |
@@ -74,6 +240,7 @@ static void __iomem *rcm_cdns_pci_map_bus(struct pci_bus *bus,
 	/* Configuration Type 0 or Type 1 access. */
 	desc0 = CDNS_PCIE_AT_OB_REGION_DESC0_HARDCODED_RID |
 		CDNS_PCIE_AT_OB_REGION_DESC0_DEVFN(0);
+
 	/*
 	 * The bus number was already set once for all in desc1 by
 	 * cdns_pcie_host_init_address_translation().
@@ -82,6 +249,7 @@ static void __iomem *rcm_cdns_pci_map_bus(struct pci_bus *bus,
 		desc0 |= CDNS_PCIE_AT_OB_REGION_DESC0_TYPE_CONF_TYPE0;
 	else
 		desc0 |= CDNS_PCIE_AT_OB_REGION_DESC0_TYPE_CONF_TYPE1;
+
 	cdns_pcie_writel(pcie, CDNS_PCIE_AT_OB_REGION_DESC0(0), desc0);
 
 	return rc->cfg_base + (where & 0xfff);
@@ -114,6 +282,18 @@ static int cdns_pcie_host_init_root_port(struct cdns_pcie_rc *rc)
 		CDNS_PCIE_LM_RC_BAR_CFG_IO_ENABLE |
 		CDNS_PCIE_LM_RC_BAR_CFG_IO_32BITS;
 	cdns_pcie_writel(pcie, CDNS_PCIE_LM_RC_BAR_CFG, value);
+
+	value = cdns_pcie_readl(pcie, 0xC8);
+	value &= ~(1 << 3);
+	cdns_pcie_writel(pcie, 0xC8, value);
+
+	value = cdns_pcie_readl(pcie, 0xE8);
+	value |= (1 << 4);
+	cdns_pcie_writel(pcie, 0xE8, value);
+
+	value = cdns_pcie_readl(pcie, 0x108);
+	value |= (1 << 20);
+	cdns_pcie_writel(pcie, 0x108, value);
 
 	/* Set root port configuration space */
 	if (rc->vendor_id != 0xffff)

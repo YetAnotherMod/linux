@@ -484,8 +484,7 @@
 			                 0x0 0x0 0x0  0x4  &gic0  0x0 0x0 28 0x4>;
 			interrupt-map-mask = <0x0 0x0 0x0  0x7>;
 			msi-parent = <&msi>;
-			sctl_rst = <&sctl 0x400>;
-			sctl_mod = <&sctl 0x404>;
+			sctl = <&sctl 0x400 0x404>;
 			// phys = <&pcie_phy0>;
 			// phy-names = "pcie-phy";
 		};
