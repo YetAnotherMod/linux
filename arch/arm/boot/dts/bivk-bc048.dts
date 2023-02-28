@@ -1,5 +1,5 @@
 /*
- * Device Tree Source for RCM MT143-05 mainboard
+ * Device Tree Source for RCM BIVK mainboard
  *
  * This file is licensed under the terms of the GNU General Public
  * License version 2.  This program is licensed "as is" without
@@ -14,12 +14,10 @@
 	aliases {
 		uart0 = &uart0;
 		mmc0 = &mmc0;
+		mmc1 = &mmc1;
 	}; 
 
 	chosen {
-		// bootargs = "console=ttyRCM0,6250000 earlyprintk debug  memblock=debug";
-		// bootargs = "console=ttyRCM0,6250000 earlyprintk debug rootwait";
-		// bootargs = "console=ttyRCM0,6250000 root=/dev/mmcblk0p1 rootwait";
 		stdout-path = &uart0;
 	};
 
@@ -35,23 +33,45 @@
 		reg = <0xC0000000 0x40000000>;
 	};
 
+	apbf0 {
+		mgeth0: mgeth0@0x01014000 {
+			status = "ok";
+			phys = <&sgmiiphy>;
+			phy-handle = <&phy0>;
+			phy-mode = "sgmii";
+		};
+
+		mgeth1: mgeth1@0x01015000 {
+			status = "ok";
+			phys = <&sgmiiphy>;
+			phy-handle = <&phy1>;
+			phy-mode = "sgmii";
+		};
+
+		mgeth2: mgeth2@0x01016000 {
+			status = "ok";
+			phys = <&sgmiiphy>;
+			phy-handle = <&phy2>;
+			phy-mode = "sgmii";
+		};
+
+		mgeth3: mgeth3@0x01017000 {
+			status = "ok";
+			phys = <&sgmiiphy>;
+			phy-handle = <&phy3>;
+			phy-mode = "sgmii";
+		};
+	};
+
 	apbs0 {
 		thermal: thermal {
-			status = "ok";
-		};
-
-		ccan0: c_can@01020000 {
-			status = "ok";
-		};
-
-		ccan1: c_can@01028000 {
 			status = "ok";
 		};
 	};
 
 	apbs1 {
 		spi@01040000 {
-			// status = "ok";
+			status = "disable";
 			cs-gpios = <&gpio0 5 0>;
 			num-cs = <1>;
 
@@ -64,9 +84,6 @@
 			};
 		};
 
-		spi@01041000 {
-			// status = "ok";
-		};
 
 		mmc0: mmc0@01042000 {
 			status = "ok";
@@ -94,40 +111,19 @@
 			status = "ok";
 		};
 
-		i2c0: i2c@0x01046000 {
-			status = "ok";
-
-			eeprom@50 {
-				compatible = "microchip,24c64", "atmel,24c64";
-				reg = <0x50>;
-				pagesize = <32>;
-				address-width = <16>;
-				size = <8192>;
-			};
-		};
-
 		timer01@01048000 {
 			status = "ok";
 		};
 
-		timer23@01049000 {
-			// status = "ok";
-		};
-
-		timer45@0104a000 {
-			// status = "ok";
-		};
-
-		timer67@0104b000 {
-			// status = "ok";
-		};
-
-		pcie_epc@0x01058000 {
-			// status = "ok";
-		};
-
 		pcie@0x01058000 {
 			status = "ok";
+
+			sw@0 {
+				pri-bus = <0x02>;
+				dev-num = <0x08 0x10 0x18 0x20 0x28 0x30 0x38 0x40 0x48 0x50 0x58>;
+				sec-bus = <0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0A 0x0B 0x0C 0x0D>;
+				sub-bus = <0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0A 0x0B 0x0C 0x0D>; 
+			};
 		};
 	};
 
@@ -153,6 +149,42 @@
 		};
 
 		gpio4: gpio0@0108c000 {
+			status = "ok";
+		};
+
+		mdio0: mdio0@0x01080000 {
+			status = "ok";
+
+			phy0: ethernet-phy@0 {
+				reg = <0>;
+			};
+		};
+
+		mdio1: mdio0@0x01081000 {
+			status = "ok";
+
+			phy1: ethernet-phy@0 {
+				reg = <0>;
+			};
+		};
+
+		mdio2: mdio0@0x01082000 {
+			status = "ok";
+
+			phy2: ethernet-phy@0 {
+				reg = <0>;
+			};
+		};
+
+		mdio3: mdio0@0x01083000 {
+			status = "ok";
+
+			phy3: ethernet-phy@0 {
+				reg = <0>;
+			};
+		};
+
+		sgmiiphy: sgmiphy@0x01086000 {
 			status = "ok";
 		};
 	};
@@ -182,7 +214,4 @@
 		};
 	};
 };
-
-// Ethernet
-#include "mt143-02.dtsi"
 

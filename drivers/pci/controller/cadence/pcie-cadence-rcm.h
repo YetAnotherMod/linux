@@ -60,7 +60,7 @@ static inline void rcm_cdns_pcie_writeb(struct cdns_pcie *pcie, u32 reg,
 
 	val = (val & mask) | ((u32)value << (off * 8));
 
-	writel(val, pcie->reg_base + reg - off);
+	writel(val, pcie->reg_base + ((reg - off) | (1 << 13)));
 }
 
 static inline void rcm_cdns_pcie_writew(struct cdns_pcie *pcie, u32 reg,
@@ -72,7 +72,7 @@ static inline void rcm_cdns_pcie_writew(struct cdns_pcie *pcie, u32 reg,
 
 	val = (val & mask) | ((u32)value << (off * 8));
 
-	writel(val, pcie->reg_base + reg - off);
+	writel(val, pcie->reg_base + ((reg - off) | (1 << 13)));
 }
 
 /* Root Port register access */

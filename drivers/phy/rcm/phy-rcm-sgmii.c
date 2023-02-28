@@ -52,9 +52,79 @@ static int rcm_sgmii_phy_power_on(struct phy *phy)
 	ret = regmap_read_poll_timeout(data->ctrl, data->ctrl_offset, val, 
 	                               val == 0x000001F1, 1000, 1000000);
 
-	if (ret < 0) {
+	if (ret) {
 		pr_debug("%s: failed to power on (val = 0x%X).", __func__, val);
 		return -EIO;
+	}
+
+	udelay(1000);
+
+	regmap_read(data->reg, 0x0238, &val);
+	if (!(val & 0x1)) {
+		regmap_write(data->reg, 0x019c, 0x00000200);
+		regmap_write(data->reg, 0x01b8, 0x04000003);
+
+		ret = regmap_read_poll_timeout(
+				data->reg, 0x0238, val,
+				val & 0x1 , 1000, 1000000
+		);
+
+		regmap_write(data->reg, 0x01b8, 0x00000000);
+		regmap_write(data->reg, 0x019c, 0x00000000);
+
+		if (ret)
+			pr_debug("%s: failed to sunc 0 (val = 0x%X).", __func__, val);
+	}
+
+	regmap_read(data->reg, 0x0638, &val);
+	if (!(val & 0x1)) {
+		regmap_write(data->reg, 0x059c, 0x00000200);
+		regmap_write(data->reg, 0x05b8, 0x04000003);
+
+		ret = regmap_read_poll_timeout(
+				data->reg, 0x0638, val,
+				val & 0x1, 1000, 1000000
+		);
+
+		regmap_write(data->reg, 0x05b8, 0x00000000);
+		regmap_write(data->reg, 0x059c, 0x00000000);
+
+		if (ret)
+			pr_debug("%s: failed to sunc 1 (val = 0x%X).", __func__, val);
+	}
+
+	regmap_read(data->reg, 0x0a38, &val);
+	if (!(val & 0x1)) {
+		regmap_write(data->reg, 0x099c, 0x00000200);
+		regmap_write(data->reg, 0x09b8, 0x04000003);
+
+		ret = regmap_read_poll_timeout(
+				data->reg, 0x0a38, val,
+				val & 0x1, 1000, 1000000
+		);
+
+		regmap_write(data->reg, 0x09b8, 0x00000000);
+		regmap_write(data->reg, 0x099c, 0x00000000);
+
+		if (ret)
+			pr_debug("%s: failed to sunc 2 (val = 0x%X).", __func__, val);
+	}
+
+	regmap_read(data->reg, 0x0e38, &val);
+	if (!(val & 0x1)) {
+		regmap_write(data->reg, 0x0d9c, 0x00000200);
+		regmap_write(data->reg, 0x0db8, 0x04000003);
+
+		ret = regmap_read_poll_timeout(
+				data->reg, 0x0e38, val,
+				val & 0x1, 1000, 1000000
+		);
+
+		regmap_write(data->reg, 0x0db8, 0x00000000);
+		regmap_write(data->reg, 0x0d9c, 0x00000000);
+
+		if (ret)
+			pr_debug("%s: failed to sunc 3 (val = 0x%X).", __func__, val);
 	}
 
 	return 0;

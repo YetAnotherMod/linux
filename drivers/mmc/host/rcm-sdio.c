@@ -804,15 +804,15 @@ static void rmsdio_request(struct mmc_host * mmc, struct mmc_request * mrq)
 
 	if ( data ) {  
 		if (data->flags & MMC_DATA_WRITE) {
-#ifndef CONFIG_BASIS_PLATFORM
-			dma_sync_single_for_cpu(host->dev, host->dma_addr, data->blocks * data->blksz, DMA_TO_DEVICE);
-#endif
+//#ifndef CONFIG_BASIS_PLATFORM
+//			dma_sync_single_for_cpu(host->dev, host->dma_addr, data->blocks * data->blksz, DMA_TO_DEVICE);
+//#endif
 			copied = sg_copy_to_buffer(data->sg, data->sg_len, 
 			                           host->buff,
 			                           data->blocks * data->blksz);
-#ifndef CONFIG_BASIS_PLATFORM
-			dma_sync_single_for_device(host->dev, host->dma_addr, data->blocks * data->blksz, DMA_TO_DEVICE);
-#endif
+//#ifndef CONFIG_BASIS_PLATFORM
+//			dma_sync_single_for_device(host->dev, host->dma_addr, data->blocks * data->blksz, DMA_TO_DEVICE);
+//#endif
 			if (copied != data->blocks * data->blksz) {
 				dev_err(host->dev,
 				        "cannot copy data from sg list\n");
@@ -845,16 +845,16 @@ static void rmsdio_request(struct mmc_host * mmc, struct mmc_request * mrq)
 
 			if ((wret > 0) &&
 			    ((data->flags & MMC_DATA_WRITE) == 0)) {
-#ifndef CONFIG_BASIS_PLATFORM
-				dma_sync_single_for_cpu(host->dev, host->dma_addr, data->blocks * data->blksz, DMA_FROM_DEVICE);
-#endif
+//#ifndef CONFIG_BASIS_PLATFORM
+//				dma_sync_single_for_cpu(host->dev, host->dma_addr, data->blocks * data->blksz, DMA_FROM_DEVICE);
+//#endif
 				copied = sg_copy_from_buffer(data->sg,
 				                             data->sg_len, 
 				                             host->buff,
 				                             data->blocks * data->blksz);
-#ifndef CONFIG_BASIS_PLATFORM
-				dma_sync_single_for_device(host->dev, host->dma_addr, data->blocks * data->blksz, DMA_FROM_DEVICE);
-#endif
+//#ifndef CONFIG_BASIS_PLATFORM
+//				dma_sync_single_for_device(host->dev, host->dma_addr, data->blocks * data->blksz, DMA_FROM_DEVICE);
+//#endif
 				if (copied != data->blocks * data->blksz) {
 					dev_err(host->dev,
 					        "cannot copy data to sg list\n");
@@ -1395,6 +1395,7 @@ static int rmsdio_probe(struct platform_device *pdev)
 	pdev->dev.archdata.dma_offset = - (pdev->dev.dma_pfn_offset << PAGE_SHIFT); /* before v5.5 it was: set_dma_offset(&pdev->dev, - (pdev->dev.dma_pfn_offset << PAGE_SHIFT)); */
 #endif
 
+#if 0
 	host->buff = kmalloc(mmc->max_req_size, GFP_KERNEL | GFP_DMA);
 	if (host->buff == NULL) {
 		dev_err(&pdev->dev, "Failed to allocate buffer\n");
@@ -1407,6 +1408,14 @@ static int rmsdio_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "Failed to map buffer\n");
 		goto error_free_buff;
 	}
+#else
+	host->buff = dma_alloc_coherent(&pdev->dev, mmc->max_req_size, &host->dma_addr, GFP_KERNEL);
+	if (!host->buff) {
+		dev_err(&pdev->dev, "Failed to allocate buffer\n");
+		ret = -ENOMEM;
+		goto error_iounmap;
+	}
+#endif
 
 	STEP(4);
 
@@ -1448,10 +1457,11 @@ error_free_irq:
 	free_irq(host->irq, host);
 
 error_unmap_buff:
-	dma_unmap_single(&pdev->dev, host->dma_addr, mmc->max_req_size, DMA_BIDIRECTIONAL);
-
-error_free_buff:
-	kfree(host->buff);
+//	dma_unmap_single(&pdev->dev, host->dma_addr, mmc->max_req_size, DMA_BIDIRECTIONAL);
+//
+//error_free_buff:
+//	kfree(host->buff);
+	dma_free_coherent(&pdev->dev, mmc->max_req_size, host->buff, host->dma_addr);
 
 error_iounmap:
 	iounmap(host->base);

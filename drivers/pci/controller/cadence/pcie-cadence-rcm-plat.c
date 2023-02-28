@@ -7,7 +7,9 @@
 #include <linux/of_pci.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
+#include <linux/regmap.h>
 #include <linux/of_device.h>
+#include <linux/mfd/syscon.h>
 #include "pcie-cadence-rcm.h"
 
 /**
@@ -55,6 +57,34 @@ static int rcm_cdns_plat_pcie_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, cdns_plat_pcie);
 
 	if (is_rc) {
+#ifdef CONFIG_TARGET_1888BC048
+		struct device_node *np = pdev->dev.of_node;
+		struct of_phandle_args args;
+		struct regmap *sctl;
+		u32 rst_offset, mod_offset;
+		u32 val;
+
+		ret = of_parse_phandle_with_fixed_args(np, "sctl", 2, 0, &args);
+		if (ret < 0) {
+			dev_err(dev, "failed to parse sctl node\n");
+			return ret;
+		}
+
+		sctl = syscon_node_to_regmap(args.np);
+		rst_offset = args.args[0];
+		mod_offset = args.args[1];
+
+		regmap_write(sctl, rst_offset, 0x00);
+		regmap_write(sctl, mod_offset, 0x3B);
+		regmap_write(sctl, rst_offset, 0x01);
+
+		ret = regmap_read_poll_timeout(sctl, rst_offset, val,
+					 val != 0x00, 1000, 1000000);
+		if (ret) {
+			dev_err(dev, "failed to lock pll\n");
+			return -EIO;
+		}
+#endif
 		if (!IS_ENABLED(CONFIG_RCM_PCIE_CADENCE_PLAT_HOST))
 			return -ENODEV;
 
@@ -112,6 +142,8 @@ static int rcm_cdns_plat_pcie_probe(struct platform_device *pdev)
 			goto err_init;
 	}
 
+	return 0;
+
  err_init:
 	pm_runtime_put_sync(dev);
 
@@ -122,7 +154,7 @@ static int rcm_cdns_plat_pcie_probe(struct platform_device *pdev)
 	while (phy_count--)
 		device_link_del(cdns_plat_pcie->pcie->link[phy_count]);
 
-	return 0;
+	return ret;
 }
 
 static void rcm_cdns_plat_pcie_shutdown(struct platform_device *pdev)
