@@ -147,10 +147,7 @@ x509.genkey
 
 # Kdevelop4
 *.kdev4
-<<<<<<< HEAD
 *.strip
-=======
 
 # Clang's compilation database file
 /compile_commands.json
->>>>>>> rcm-master-v5.5
