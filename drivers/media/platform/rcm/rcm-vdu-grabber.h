@@ -4,6 +4,10 @@
 #include <linux/ioctl.h>
 #include <linux/watchdog.h>
 #include <linux/version.h>
+#include <media/media-device.h>
+#include <media/v4l2-async.h>
+#include <media/v4l2-ctrls.h>
+#include <media/v4l2-device.h>
 
 	// CONTROL
 	#define ADDR_ID_REG           0x000
@@ -206,6 +210,12 @@
 		{ (235<<16)+16, (240<<16)+16, (240<<16)+16 }
 	};
 
+struct grb_graph_entity {
+	struct v4l2_async_subdev asd;
+	struct device_node *node;
+	struct media_entity *entity;
+	struct v4l2_subdev *subdev;
+};
 
 struct grb_info {
 	struct device *dev;
@@ -220,10 +230,20 @@ struct grb_info {
 	//wait_queue_head_t wait_queue;
 	struct completion cmpl;
 	spinlock_t irq_lock;
-	struct v4l2_device v4l2_device;
+	struct v4l2_device v4l2_dev;
+	struct media_device media_dev;
 	struct v4l2_pix_format user_format;
 	struct v4l2_rect cropping;
 	struct v4l2_pix_format recognize_format;
+
+	struct media_pad pad;
+
+	struct v4l2_async_notifier	notifier;
+	struct grb_graph_entity		entity;
+
+	struct v4l2_subdev *src_subdev;
+	int src_pad;
+
 	struct input_format in_f;
 	struct output_format out_f;
 	struct grb_parameters param;
@@ -237,5 +257,7 @@ struct grb_info {
 	u32 mem_offset1, mem_offset2;		// fill set_register
 	u32 buff_length;					// fiil buf_setup
 };
+
+#define notifier_to_grb(n) container_of(n, struct grb_info, notifier)
 
 #endif // RCM_VDU_GRABBER_H

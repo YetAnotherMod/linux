@@ -1,3 +1,4 @@
+#include <linux/list.h>
 #include <linux/device.h>
 #include <linux/delay.h>
 #include <linux/fs.h>
@@ -14,12 +15,16 @@
 #include <linux/vmalloc.h>
 #include <linux/dma-mapping.h>
 #include <linux/of_platform.h>
+#include <linux/of_graph.h>
 
 #include <media/videobuf-dma-contig.h>
 #include <media/videobuf-core.h>
+#include <media/v4l2-common.h>
 #include <media/v4l2-dev.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-ioctl.h>
+#include <media/v4l2-mediabus.h>
+#include <media/v4l2-fwnode.h>
 
 #include <asm/delay.h>
 #include <asm/io.h>
@@ -39,7 +44,10 @@
 
 #define GRB_DBG_PRINT_PROC_CALL GRB_DBG_PRINT("%s\n",__FUNCTION__)
 
-#ifdef RCM_VDU_GRB_DBG
+enum {
+	RCM_VDU_GRB_SINK,
+	RCM_VDU_GRB_NR_PADS
+};
 
 struct videobuf_dma_contig_memory {
 	u32 magic;
@@ -47,6 +55,27 @@ struct videobuf_dma_contig_memory {
 	dma_addr_t dma_handle;
 	unsigned long size;
 };
+
+static inline struct grb_graph_entity *
+to_grb_entity(struct v4l2_async_subdev *asd)
+{
+	return container_of(asd, struct grb_graph_entity, asd);
+}
+
+static void print_detected_frame_info(unsigned int size, unsigned int  param) {
+
+		GRB_DBG_PRINT( "detected frame size: width=%u,height=%u\n", size & 0xFFF, (size >> 16) & 0xFFF);
+		GRB_DBG_PRINT( "detected frame param: active_bus=%u,vi_ena=%u,interlace=%u,vsync_pol=%u,hsync_pol=%u,dv0_act=%u,dv1_act=%u,dv0_act=%u\n",
+		                             param & 0x3, (param >> 2) & 1, (param >> 4) & 1, (param >> 5) & 1, (param >> 6) & 1, 
+									 (param >> 8) & 1, (param >> 9) & 1, (param >> 10) & 1);
+}
+
+static void print_v4l2_pix_format( struct v4l2_pix_format* fmt ) {
+	if(fmt) {
+		GRB_DBG_PRINT( "pix format: width=%u,height=%u,pixelformat=%u,field=%u,bytesperline=%u,sizeimage=%u,colorspace=%x\n",
+						fmt->width,fmt->height,fmt->pixelformat,fmt->field,fmt->bytesperline,fmt->sizeimage,fmt->colorspace );
+	}
+}
 
 static void print_videobuf_queue_param( struct videobuf_queue* queue, unsigned int num ) {
 	unsigned int i=0 ;
@@ -79,10 +108,12 @@ static void print_four_cc( const char* info, unsigned int f ) {
 	GRB_DBG_PRINT( "%s: '%c%c%c%c'", info, (u8)(f>>0), (u8)(f>>8), (u8)(f>>16), (u8)(f>>24) )
 }
 
+/*
 static void print_v4l2_selection( const char* info, int arg, const struct v4l2_selection* s ) {
 		GRB_DBG_PRINT( "%s(%08x): target=%x,flag=%x,rect=%x,%x,%x,%x\n",
 						info, arg, s->target, s->flags, s->r.left, s->r.top, s->r.width, s->r.height )
 }
+*/
 
 static void print_v4l2_format( const char* info, int arg, const struct v4l2_format* f ) {
 	GRB_DBG_PRINT( "%s(%08x): type=%x,fmt: width=%x,height=%x,pixelformat=%x\n"
@@ -97,8 +128,6 @@ static void print_v4l2_buffer( const char* info, const struct v4l2_buffer* b ) {
 	GRB_DBG_PRINT( "%s: index=%x,type=%x,bytesused=%x,flags=%x,field=%x,sequence=%x,memory=%x,offset=%x,length=%x\n",
 					info, b->index, b->type, b->bytesused, b->flags, b->field, b->sequence, b->memory, b->m.offset, b->length )
 }
-
-#endif // RCM_VDU_GRB_DBG
 
 static inline void write_register( u32 val, void __iomem *addr, u32 offset ) {
 	iowrite32( val, addr + offset );
@@ -126,6 +155,22 @@ static inline void print_registers( void __iomem *addr, unsigned int begin, unsi
 		val = read_register( addr, reg );
 		GRB_DBG_PRINT( "get(0x%08X, 0x%08X)\n", reg, val )
 	}
+}
+
+static void dump_all_regs(char *info, void __iomem *addr) {
+#if 0
+	GRB_DBG_PRINT("*s:\n", info);
+	GRB_DBG_PRINT("CONTROL group:\n");
+	print_registers(addr, ADDR_ID_REG, ADDR_REC_ENABLE);
+	GRB_DBG_PRINT("STATUS group:\n");
+	print_registers(addr, ADDR_ACTIVE_FRAME, ADDR_DMA_ERROR);
+	GRB_DBG_PRINT("INTERRUPT group:\n");
+	print_registers(addr, ADDR_INT_STATUS, ADDR_INTERRUPTION);
+	GRB_DBG_PRINT("COLOR_CONVERSION group:\n");
+	print_registers(addr, ADDR_GAM_ENABLE, ADDR_CH2_RANGE);
+	GRB_DBG_PRINT("DMA_WR group:\n");
+	print_registers(addr, ADDR_BASE_SW_ENA, ADDR_AXI_PARAM);
+#endif
 }
 
 static int reset_grab( void __iomem *addr ) {
@@ -455,7 +500,7 @@ int setup_registers( struct grb_info *grb_info_ptr ) {
 	GRB_DBG_PRINT( "y_hor_size=%d,y_ver_size=%d,c_hor_size=%d,c_ver_size=%d,y_full_size=%d,c_full_size=%d,mem_offset1=%d,mem_offset2=%d,alpha=%d\n",
 			 y_hor_size, y_ver_size, c_hor_size, c_ver_size, y_full_size, c_full_size,
 			 grb_info_ptr->mem_offset1, grb_info_ptr->mem_offset2, grb_info_ptr->param.alpha )
-	//print_videobuf_queue_param( &grb_info_ptr->videobuf_queue_grb, 2 ); 						// print vaddr,dma_handle,size for each buffer
+	print_videobuf_queue_param( &grb_info_ptr->videobuf_queue_grb, 2 ); 						// print vaddr,dma_handle,size for each buffer
 
 	base_addr0_dma0 = videobuf_to_dma_contig_rcm( grb_info_ptr->videobuf_queue_grb.bufs[0] );	// just return dma address
 	//base_addr0_dma1 = base_addr0_dma0 + grb_info_ptr->mem_offset1;
@@ -529,7 +574,7 @@ static int buf_setup_grb ( struct videobuf_queue *q, unsigned int *count, unsign
 
 static int buf_prepare_grb ( struct videobuf_queue *q, struct videobuf_buffer *vb, enum v4l2_field field ) {
 	struct grb_info *grb_info_ptr = q->priv_data;
-	GRB_DBG_PRINT_PROC_CALL
+	GRB_DBG_PRINT_PROC_CALL;
 	vb->size = grb_info_ptr->user_format.sizeimage;
 	vb->width = grb_info_ptr->user_format.bytesperline;
 	vb->height = grb_info_ptr->user_format.height;
@@ -549,7 +594,7 @@ static int buf_prepare_grb ( struct videobuf_queue *q, struct videobuf_buffer *v
 
 static void buf_queue_grb ( struct videobuf_queue *q, struct videobuf_buffer *vb ) {
 	struct grb_info* grb_info_ptr = q->priv_data;
-	GRB_DBG_PRINT_PROC_CALL
+	GRB_DBG_PRINT_PROC_CALL;
 	list_add_tail( &vb->queue, &grb_info_ptr->buffer_queue );	// Note that videobuf holds the lock when it calls us, so we need not (indeed, cannot) take it here
 	vb->state = VIDEOBUF_QUEUED;
 	//print_videobuf_queue_param( q, 4 );
@@ -558,7 +603,7 @@ static void buf_queue_grb ( struct videobuf_queue *q, struct videobuf_buffer *vb
 static void buf_release_grb ( struct videobuf_queue *q, struct videobuf_buffer *vb ) {
 	struct grb_info* grb_info_ptr = q->priv_data;
 	unsigned long flags;
-	GRB_DBG_PRINT_PROC_CALL
+	GRB_DBG_PRINT_PROC_CALL;
 	spin_lock_irqsave( &grb_info_ptr->irq_lock, flags );
 	INIT_LIST_HEAD( &grb_info_ptr->buffer_queue );				// We need to flush the buffer from the dma queue since hey are de-allocated
 	spin_unlock_irqrestore( &grb_info_ptr->irq_lock, flags );
@@ -585,14 +630,32 @@ static int drv_vidioc_auto_detect( struct grb_info *grb_info_ptr, void *arg );
 
 static int device_open( struct file *file_ptr ) {
 	struct grb_info *grb_info_ptr = video_drvdata( file_ptr) ;
-#ifdef RCM_VDU_GRB_DBG
-	GRB_DBG_PRINT(
-#else
-	dev_info( grb_info_ptr->dev,
-#endif
-			  "Open video4linux2 device. Name: %s, base: %x \n" ,
-			  grb_info_ptr->video_dev.name,
-			  (u32)grb_info_ptr->phys_addr_regs_grb );
+	struct v4l2_subdev *sd = grb_info_ptr->entity.subdev;
+	int ret;
+
+	void __iomem* base_addr = grb_info_ptr->base_addr_regs_grb;
+
+	dev_dbg( grb_info_ptr->dev, "Open video4linux2 device. Name: %s, base: %x \n" ,
+			  grb_info_ptr->video_dev.name, (u32)grb_info_ptr->phys_addr_regs_grb );
+
+
+//	ret = v4l2_fh_open(file_ptr);
+//	if (ret < 0) {
+//		dev_err(grb_info_ptr->dev, "Error! v4l2_fh_open fail.\n");
+//		return ret;
+//	}
+
+//	if (!v4l2_fh_is_singular_file(file_ptr)) {
+//		dev_err(grb_info_ptr->dev, "Error! v4l2_fh_file are not singular.\n");
+//		goto fh_rel;
+//	}
+
+	ret = v4l2_subdev_call(sd, core, s_power, 1);
+	if (ret < 0 && ret != -ENOIOCTLCMD){
+		dev_err(grb_info_ptr->dev, "Error power up subdev\n");
+		goto fh_rel;
+	}
+
 
 	drv_vidioc_auto_detect( grb_info_ptr, NULL );
 
@@ -605,15 +668,32 @@ static int device_open( struct file *file_ptr ) {
 									sizeof(struct videobuf_buffer),
 									grb_info_ptr,
 									NULL );
+
+	dump_all_regs("Dump regs after device_open", base_addr);
+
 	return 0;
+
+fh_rel:
+//	v4l2_fh_release(file_ptr);
+	return ret;
 }
 
 static int device_release(struct file *file_ptr ) {
 	struct video_device *video_dev = video_devdata( file_ptr );
 	struct grb_info *grb_info_ptr = video_drvdata( file_ptr );
 	int err;
+	struct v4l2_subdev *sd = grb_info_ptr->entity.subdev;
+//	bool fh_singular;
 
-	dev_info( grb_info_ptr->dev, "Close video4linux2 device. Name: %s \n" , video_dev->name );
+	dev_dbg( grb_info_ptr->dev, "Close video4linux2 device. Name: %s \n" , video_dev->name );
+
+//	fh_singular = v4l2_fh_is_singular_file(file_ptr);
+
+	//_vb2_fop_release(file, NULL);
+//	v4l2_fh_release(file_ptr);
+
+//	if (fh_singular)
+		v4l2_subdev_call(sd, core, s_power, 0);
 
 	videobuf_stop(  &grb_info_ptr->videobuf_queue_grb );			// The call to videobuf_stop() terminates any I/O in progress-though it is still up to the driver to stop the capture engine.
 	err = videobuf_mmap_free( &grb_info_ptr->videobuf_queue_grb );	// The call to videobuf_mmap_free() will ensure that all buffers have been unmapped.
@@ -645,12 +725,12 @@ static int vidioc_querycap_grb ( struct file* file_ptr, void* fh, struct v4l2_ca
 {
 	struct grb_info *grb_info_ptr = video_drvdata( file_ptr );
 	char bus_info[32];
-	
+
 	strlcpy( v4l2_cap_ptr->driver, RCM_GRB_DRIVER_NAME, sizeof(v4l2_cap_ptr->driver) );
 	strlcpy( v4l2_cap_ptr->card, RCM_GRB_DEVICE_NAME, sizeof(v4l2_cap_ptr->card) );
-	snprintf( bus_info, sizeof(bus_info), "APB: 0x%x", (u32)virt_to_phys(grb_info_ptr->base_addr_regs_grb) );
+	snprintf( bus_info, sizeof(bus_info), "platform:vdu-grabber@0x%x", (u32)virt_to_phys(grb_info_ptr->base_addr_regs_grb) );
 	strlcpy( v4l2_cap_ptr->bus_info, bus_info, sizeof(v4l2_cap_ptr->bus_info) ) ;
-	v4l2_cap_ptr->version = RCM_GRB_DRIVER_VERSION;
+//	v4l2_cap_ptr->version = RCM_GRB_DRIVER_VERSION;
 	v4l2_cap_ptr->device_caps = grb_info_ptr->video_dev.device_caps;
 	v4l2_cap_ptr->capabilities = v4l2_cap_ptr->device_caps | V4L2_CAP_DEVICE_CAPS;
 	v4l2_cap_ptr->reserved[0] = v4l2_cap_ptr->reserved[1] = v4l2_cap_ptr->reserved[2] = 0;
@@ -686,7 +766,9 @@ static int vidioc_fmt( struct grb_info *grb_info_ptr, struct v4l2_format *f ) {
 		f->fmt.pix.width = grb_info_ptr->recognize_format.width;
 		f->fmt.pix.height = grb_info_ptr->user_format.height = grb_info_ptr->recognize_format.height;
 		f->fmt.pix.field = grb_info_ptr->recognize_format.field;
-		//print_four_cc( "vidioc_fmt entry: ", f->fmt.pix.pixelformat );
+
+		print_four_cc( "vidioc_fmt entry: ", f->fmt.pix.pixelformat );
+
 		switch( f->fmt.pix.pixelformat  ) {
 		default:
 			f->fmt.pix.pixelformat = V4L2_PIX_FMT_NV16;
@@ -714,7 +796,9 @@ static int vidioc_fmt( struct grb_info *grb_info_ptr, struct v4l2_format *f ) {
 		f->fmt.pix.ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
 		f->fmt.pix.quantization = V4L2_QUANTIZATION_DEFAULT;
 		f->fmt.pix.xfer_func = 0;
-		//print_four_cc( "vidioc_fmt return: ", f->fmt.pix.pixelformat );
+
+		print_four_cc( "vidioc_fmt return: ", f->fmt.pix.pixelformat );
+
 		return 0;
 	}
 	else
@@ -761,7 +845,7 @@ static int vidioc_g_fmt_vid_cap_grb ( struct file *file_ptr, void *fh, struct v4
 	int ret;
 	struct grb_info *grb_info_ptr = video_drvdata(file_ptr);
 	ret = vidioc_fmt( grb_info_ptr, f );
-	//print_v4l2_format( "Vidioc_g_fmt_vid_cap_grb return", (int)grb_info_ptr->phys_addr_regs_grb, f );
+	print_v4l2_format( "Vidioc_g_fmt_vid_cap_grb return", (int)grb_info_ptr->phys_addr_regs_grb, f );
 	return ret;
 }
 
@@ -769,7 +853,7 @@ static int vidioc_try_fmt_vid_cap_grb( struct file *file_ptr, void *fh, struct v
 	int ret;
 	struct grb_info *grb_info_ptr = video_drvdata( file_ptr );
 	ret = vidioc_fmt( grb_info_ptr, f ) || set_output_format( grb_info_ptr, f );
-	//print_v4l2_format( "Vidioc_try_fmt_vid_cap_grb return", (int)grb_info_ptr->phys_addr_regs_grb, f );
+	print_v4l2_format( "Vidioc_try_fmt_vid_cap_grb return", (int)grb_info_ptr->phys_addr_regs_grb, f );
 	return ret;
 }
 
@@ -777,7 +861,7 @@ static int vidioc_s_fmt_vid_cap_grb ( struct file *file_ptr, void *fh, struct v4
 	int ret;
 	struct grb_info *grb_info_ptr = video_drvdata( file_ptr );
 	ret = vidioc_fmt( grb_info_ptr, f ) || set_output_format( grb_info_ptr, f );	//negotiate the format of data (typically image format) exchanged between driver and application
-	//print_v4l2_format( "Vidioc_s_fmt_vid_cap_grb return", (int)grb_info_ptr->phys_addr_regs_grb, f );
+	print_v4l2_format( "Vidioc_s_fmt_vid_cap_grb return", (int)grb_info_ptr->phys_addr_regs_grb, f );
 	return ret;
 }
 
@@ -785,28 +869,28 @@ static int vidioc_reqbufs_grb ( struct file *file_ptr, void *fh, struct v4l2_req
 	struct grb_info *grb_info_ptr = video_drvdata( file_ptr );
 	unsigned long flags;
 	int ret;
-	GRB_DBG_PRINT_PROC_CALL
+	GRB_DBG_PRINT_PROC_CALL;
 	spin_lock_irqsave( &grb_info_ptr->irq_lock, flags );
 	INIT_LIST_HEAD( &grb_info_ptr->buffer_queue );
 	spin_unlock_irqrestore( &grb_info_ptr->irq_lock, flags );
 	ret = videobuf_reqbufs( &grb_info_ptr->videobuf_queue_grb, req );
-	//print_videobuf_queue_param( &grb_info_ptr->videobuf_queue_grb, 4 );
+	print_videobuf_queue_param( &grb_info_ptr->videobuf_queue_grb, 4 );
 	return ret;
 }
 
 static int vidioc_querybuf_grb( struct file *file_ptr, void *fh, struct v4l2_buffer *buf ) {
 	struct grb_info *grb_info_ptr = video_drvdata(file_ptr);
 	int ret = videobuf_querybuf(&grb_info_ptr->videobuf_queue_grb, buf);
-	//print_v4l2_buffer( "vidioc_querybuf_grb", buf );
-	//print_videobuf_queue_param( &grb_info_ptr->videobuf_queue_grb, 4 );
+	print_v4l2_buffer( "vidioc_querybuf_grb", buf );
+	print_videobuf_queue_param( &grb_info_ptr->videobuf_queue_grb, 4 );
 	return ret;
 }
 
 static int vidioc_qbuf_grb( struct file *file_ptr, void *fh, struct v4l2_buffer *buf ) {
 	struct grb_info *grb_info_ptr = video_drvdata(file_ptr);
 	int ret = videobuf_qbuf(&grb_info_ptr->videobuf_queue_grb, buf);
-	//print_v4l2_buffer( "vidioc_qbuf_grb", buf );
-	//print_videobuf_queue_param( &grb_info_ptr->videobuf_queue_grb, 4 );
+	print_v4l2_buffer( "vidioc_qbuf_grb", buf );
+	print_videobuf_queue_param( &grb_info_ptr->videobuf_queue_grb, 4 );
 	return ret;
 }
 
@@ -814,32 +898,63 @@ static int vidioc_dqbuf_grb( struct file *file_ptr, void *fh, struct v4l2_buffer
 	struct grb_info *grb_info_ptr = video_drvdata(file_ptr);
 	struct videobuf_queue* videobuf_queue = &grb_info_ptr->videobuf_queue_grb;
 	int ret = videobuf_dqbuf( videobuf_queue, buf, file_ptr->f_flags & O_NONBLOCK );
-	//print_v4l2_buffer( "vidioc_dqbuf_grb", buf );
-	//print_videobuf_queue_param( &grb_info_ptr->videobuf_queue_grb, 4 );
+	print_v4l2_buffer( "vidioc_dqbuf_grb", buf );
+	print_videobuf_queue_param( &grb_info_ptr->videobuf_queue_grb, 4 );
 	return ret;
 }
 
 static int vidioc_streamon_grb( struct file *file_ptr, void *fh, enum v4l2_buf_type type ) {
 	struct grb_info *grb_info_ptr = video_drvdata(file_ptr);
 	int retval;
-	GRB_DBG_PRINT_PROC_CALL
+	void __iomem* base_addr = grb_info_ptr->base_addr_regs_grb;
+
+	GRB_DBG_PRINT_PROC_CALL;
 	if( type != V4L2_BUF_TYPE_VIDEO_CAPTURE )
 		return -EINVAL;
 
-	retval = setup_registers( grb_info_ptr );
-	if( retval < 0 ) {
-		GRB_DBG_PRINT( "set_register failed \n")
+	dump_all_regs("Dump regs before vidioc_streamon_grb", base_addr);
+
+	/* Enable stream on the sub device */
+	retval = v4l2_subdev_call(grb_info_ptr->entity.subdev, video, s_stream, 1);
+	if (retval && retval != -ENOIOCTLCMD) {
+		dev_err(grb_info_ptr->dev, "stream on failed in subdev\n");
 		return retval;
 	}
-	return videobuf_streamon( &grb_info_ptr->videobuf_queue_grb );
+
+	dump_all_regs("Dump regs after Enable stream on the sub device", base_addr);
+
+
+	retval = setup_registers( grb_info_ptr );
+	if( retval < 0 ) {
+		dev_err(grb_info_ptr->dev,  "set_register failed \n");
+		goto err_start_stream;
+	}
+	retval = videobuf_streamon( &grb_info_ptr->videobuf_queue_grb );
+	if( retval < 0 ) {
+		dev_err(grb_info_ptr->dev,  "videobuf_streamon failed \n");
+		goto err_start_stream;
+	}
+
+	dump_all_regs("Dump regs after vidioc_streamon_grb", base_addr);
+
+	return 0;
+
+err_start_stream:
+	v4l2_subdev_call(grb_info_ptr->entity.subdev, video, s_stream, 0);
+	return retval;
 }
 
 static int vidioc_streamoff_grb( struct file *file_ptr, void *__fh, enum v4l2_buf_type type ) {
 	struct grb_info *grb_info_ptr = video_drvdata(file_ptr);
 	int retval;
-	GRB_DBG_PRINT_PROC_CALL
+	GRB_DBG_PRINT_PROC_CALL;
 	if ( type != V4L2_BUF_TYPE_VIDEO_CAPTURE )
 		return -EINVAL;
+
+	/* Disable stream on the sub device */
+	retval = v4l2_subdev_call(grb_info_ptr->entity.subdev, video, s_stream, 0);
+	if (retval && retval != -ENOIOCTLCMD)
+		dev_err(grb_info_ptr->dev, "stream off failed in subdev\n");
 
 	retval = videobuf_streamoff( &grb_info_ptr->videobuf_queue_grb );
 	reset_grab( grb_info_ptr->base_addr_regs_grb );
@@ -862,13 +977,13 @@ static void drv_set_gamma( struct grb_info *grb_info_ptr, void *arg ) {
 
 static void drv_vidioc_g_params( struct grb_info *grb_info_ptr, void *arg ) {
 	struct grb_parameters* param = (struct grb_parameters*)arg;
-	GRB_DBG_PRINT_PROC_CALL
+	GRB_DBG_PRINT_PROC_CALL;
 	param = &grb_info_ptr->param;
 }
 
 static int drv_vidioc_s_params( struct grb_info *grb_info_ptr, void *arg ) { // VIDIOC_S_PARAMS
 	struct grb_parameters* param = (struct grb_parameters*)arg;
-	GRB_DBG_PRINT_PROC_CALL
+	GRB_DBG_PRINT_PROC_CALL;
 	grb_info_ptr->param = *param;
 	return set_input_format( grb_info_ptr );
 }
@@ -876,9 +991,14 @@ static int drv_vidioc_s_params( struct grb_info *grb_info_ptr, void *arg ) { // 
 static int drv_vidioc_auto_detect( struct grb_info *grb_info_ptr, void *arg )
 { // todo mutex
 	struct v4l2_pix_format* recognize_format = (struct v4l2_pix_format*)arg;
+	void __iomem* base_addr = grb_info_ptr->base_addr_regs_grb;
 
-	if( reset_grab( grb_info_ptr->base_addr_regs_grb ) )
+	GRB_DBG_PRINT_PROC_CALL;
+
+	if( reset_grab( grb_info_ptr->base_addr_regs_grb ) ) {
+		GRB_DBG_PRINT( "1. reset failed\n" )
 		return -EIO;
+	}
 
 	init_completion( &grb_info_ptr->cmpl );
 	set_register( INT_BIT_DONE, grb_info_ptr->base_addr_regs_grb, ADDR_INT_STATUS );
@@ -886,10 +1006,41 @@ static int drv_vidioc_auto_detect( struct grb_info *grb_info_ptr, void *arg )
 	write_register( 1 , grb_info_ptr->base_addr_regs_grb, ADDR_REC_ENABLE );
 	//print_registers( grb_info_ptr->base_addr_regs_grb, 0x100, 0x108 );
 
-	if( wait_for_completion_timeout( &grb_info_ptr->cmpl, (HZ/10) ) == 0 ) {
-		GRB_DBG_PRINT( "Vidioc autodetection: timeout\n" )
+	GRB_DBG_PRINT( "1.autodetection\n" )
+
+	if( wait_for_completion_timeout( &grb_info_ptr->cmpl, (HZ/2) ) == 0 ) {
+		GRB_DBG_PRINT( "1. Vidioc autodetection: timeout\n" )
+
+		dump_all_regs("1. Dump regs after drv_vidioc_auto_detect timeout", base_addr);
+
+//		return -ETIMEDOUT;
+	}
+
+	print_v4l2_pix_format(&grb_info_ptr->recognize_format);
+	GRB_DBG_PRINT( "2.autodetection\n" )
+
+	if( reset_grab( grb_info_ptr->base_addr_regs_grb ) ) {
+		GRB_DBG_PRINT( "1. reset failed\n" )
+		return -EIO;
+	}
+
+	init_completion( &grb_info_ptr->cmpl );
+	set_register( INT_BIT_DONE, grb_info_ptr->base_addr_regs_grb, ADDR_INT_STATUS );
+	set_register( INT_BIT_DONE, grb_info_ptr->base_addr_regs_grb, ADDR_INT_MASK );
+	write_register( 1 , grb_info_ptr->base_addr_regs_grb, ADDR_REC_ENABLE );
+	//print_registers( grb_info_ptr->base_addr_regs_grb, 0x100, 0x108 );
+
+	if( wait_for_completion_timeout( &grb_info_ptr->cmpl, (HZ/2) ) == 0 ) {
+		GRB_DBG_PRINT( "2. Vidioc autodetection: timeout\n" )
+
+		dump_all_regs("2. Dump regs after drv_vidioc_auto_detect timeout", base_addr);
+
 		return -ETIMEDOUT;
 	}
+
+	print_v4l2_pix_format(&grb_info_ptr->recognize_format);
+
+	dump_all_regs("Dump regs after drv_vidioc_auto_detect", base_addr);
 
 	if( recognize_format )
 		*recognize_format = grb_info_ptr->recognize_format;
@@ -950,7 +1101,7 @@ exit:
 
 static int vidioc_s_selection_grb( struct file *file, void *fh, struct v4l2_selection *s ) {
 	struct grb_info *grb_info_ptr = video_drvdata(file);
-	GRB_DBG_PRINT_PROC_CALL
+	GRB_DBG_PRINT_PROC_CALL;
 	if (s->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
 		return -EINVAL;
 	grb_info_ptr->cropping = s->r; // rect
@@ -1063,13 +1214,20 @@ static int vidioc_enum_framesizes_grb( struct file *file, void *fh, struct v4l2_
 }
 
 static int vidioc_g_parm_grb( struct file *file, void *fh, struct v4l2_streamparm *a ) {
+	struct grb_info *grb = video_drvdata(file);
+
 	GRB_DBG_PRINT( "vidioc_g_parm_grb: type=%u\n", a->type )
-	return -EINVAL;
+
+	return v4l2_g_parm_cap(video_devdata(file), grb->entity.subdev, a);
+
 }
 
 static int vidioc_s_parm_grb( struct file *file, void *fh, struct v4l2_streamparm *a ) {
+	struct grb_info *grb = video_drvdata(file);
+
 	GRB_DBG_PRINT( "vidioc_s_parm_grb: type=%u\n", a->type )
-	return -EINVAL;
+
+	return v4l2_s_parm_cap(video_devdata(file), grb->entity.subdev, a);
 }
 
 static int vidioc_enum_input_grb( struct file *file, void *fh, struct v4l2_input *inp ) {
@@ -1078,6 +1236,7 @@ static int vidioc_enum_input_grb( struct file *file, void *fh, struct v4l2_input
 	GRB_DBG_PRINT( "vidioc_enum_input_grb: index=%u\n", inp->index )
 	if( inp->index != 0 )
 		return -EINVAL;
+
 	snprintf( inp->name, sizeof(inp->name), "%s(%08x)", RCM_GRB_DEVICE_NAME, (u32)grb_info_ptr->phys_addr_regs_grb );
 	inp->type = V4L2_INPUT_TYPE_CAMERA;
 	inp->audioset = 0;
@@ -1088,7 +1247,7 @@ static int vidioc_enum_input_grb( struct file *file, void *fh, struct v4l2_input
 	inp->reserved[0] = inp->reserved[1] = inp->reserved[2] = 0;
 	return 0;
 }
-/*
+
 static int vidioc_g_input_grb( struct file *file, void *fh, unsigned int *i ) {
 	GRB_DBG_PRINT( "vidioc_g_input_grb: i=%u\n", *i )
 	*i = 0;
@@ -1101,7 +1260,7 @@ static int vidioc_s_input_grb( struct file *file, void *fh, unsigned int i ) {
 		return 0;
 	return -EINVAL;
 }
-*/
+
 // grb capture ioctl operations 
 static const struct v4l2_ioctl_ops grb_ioctl_ops = {
 	.vidioc_querycap			= vidioc_querycap_grb,
@@ -1129,8 +1288,8 @@ static const struct v4l2_ioctl_ops grb_ioctl_ops = {
 	.vidioc_g_parm				= vidioc_g_parm_grb,
 	.vidioc_s_parm				= vidioc_s_parm_grb,
 	.vidioc_enum_input			= vidioc_enum_input_grb,
-//	.vidioc_g_input				= vidioc_g_input_grb,
-//	.vidioc_s_input				= vidioc_s_input_grb
+	.vidioc_g_input				= vidioc_g_input_grb,
+	.vidioc_s_input				= vidioc_s_input_grb
 };
 
 static struct videobuf_buffer* grb_next_buffer( struct list_head* buffer_queue ) { // from interrupt context,because without spinlock
@@ -1186,8 +1345,8 @@ static irqreturn_t proc_interrupt (struct grb_info *grb_info_ptr) {
 
 		grb_info_ptr->frame_count = grb_info_ptr->frame_count + 1;
 
-		// GRB_DBG_PRINT( "irq_handler: frame_count = %d; switch_page = %d\n", grb_info_ptr->frame_count , switch_page )
-		//print_videobuf_queue_param2( &grb_info_ptr->videobuf_queue_grb, grb_info_ptr->frame_count-1, 0, grb_info_ptr->mem_offset1/*-4*/, grb_info_ptr->mem_offset2/*-4*/ );
+		GRB_DBG_PRINT( "irq_handler: frame_count = %d; switch_page = %d\n", grb_info_ptr->frame_count , switch_page )
+		print_videobuf_queue_param2( &grb_info_ptr->videobuf_queue_grb, grb_info_ptr->frame_count-1, 0, grb_info_ptr->mem_offset1/*-4*/, grb_info_ptr->mem_offset2/*-4*/ );
 
 		if( grb_info_ptr->next_buf_num < grb_info_ptr->reqv_buf_cnt ) { // prepare next buffer,if it avalaible
 			base_addr0_dma = videobuf_to_dma_contig_rcm( grb_info_ptr->videobuf_queue_grb.bufs[grb_info_ptr->next_buf_num] );
@@ -1210,17 +1369,21 @@ static irqreturn_t proc_interrupt (struct grb_info *grb_info_ptr) {
 		}
 	}
 	else if( rd_data & INT_BIT_DONE ) {
+		unsigned int frame_size, frame_param;
+
 		GRB_DBG_PRINT( "irq_handler: scan detected\n" )
 
 		set_register( INT_BIT_DONE, base_addr, ADDR_INT_STATUS );
 		clr_register( INT_BIT_DONE, base_addr, ADDR_INT_MASK );
-		rd_data = read_register( base_addr, ADDR_FRAME_SIZE );
-		grb_info_ptr->recognize_format.height  = (rd_data >> 16) & 0xFFF;	// 27:16-height
-		grb_info_ptr->recognize_format.width = rd_data & 0xFFF;				// 11:0-width
-		rd_data = read_register( base_addr, ADDR_FRAME_PARAM );
+		frame_size = read_register( base_addr, ADDR_FRAME_SIZE );
+		grb_info_ptr->recognize_format.height  = (frame_size >> 16) & 0xFFF;	// 27:16-height
+		grb_info_ptr->recognize_format.width = frame_size & 0xFFF;				// 11:0-width
+		frame_param = read_register( base_addr, ADDR_FRAME_PARAM );
 		grb_info_ptr->recognize_format.pixelformat = 0;						// set format default?
-		grb_info_ptr->recognize_format.field = ( rd_data & 0x10 ) ? V4L2_FIELD_INTERLACED : V4L2_FIELD_NONE;
+		grb_info_ptr->recognize_format.field = ( frame_param & 0x10 ) ? V4L2_FIELD_INTERLACED : V4L2_FIELD_NONE;
 		complete_all( &grb_info_ptr->cmpl );
+
+		print_detected_frame_info(frame_size, frame_param);
 	}
 	else {																	// we do not must be here
 		GRB_DBG_PRINT( "irq_handler: unhandled status %08x\n", rd_data )
@@ -1236,6 +1399,178 @@ static irqreturn_t irq_handler( int irq, void* dev ) {
 	grb_irq = proc_interrupt( grb_info_ptr );
 	spin_unlock( &grb_info_ptr->irq_lock );
 	return grb_irq;
+}
+
+static int grb_graph_notify_complete(struct v4l2_async_notifier *notifier)
+{
+	struct grb_info *grb = notifier_to_grb(notifier);
+	int ret;
+
+	grb->video_dev.ctrl_handler = grb->entity.subdev->ctrl_handler;
+#if 0 //need correct
+	ret = grb_formats_init(grb);
+	if (ret) {
+		dev_err(grb->video_dev, "No supported mediabus format found\n");
+		return ret;
+	}
+	grb_camera_set_bus_param(grb);
+
+	ret = grb_set_default_fmt(grb);
+	if (ret) {
+		dev_err(grb->dev, "Could not set default format\n");
+		return ret;
+	}
+#endif
+
+	ret = video_register_device(&grb->video_dev, VFL_TYPE_GRABBER, -1);
+	if (ret) {
+		dev_err(grb->dev, "Failed to register video device\n");
+		return ret;
+	}
+
+	dev_info(grb->dev, "Device registered as '%s'.\n", video_device_node_name(&grb->video_dev));
+
+	dev_dbg(grb->dev, "Notify complete, all subdevs registered\n");
+
+	/* Create the media link. */
+	dev_dbg(grb->dev, "creating %s:%u -> %s:%u link\n",
+			grb->src_subdev->entity.name, grb->src_pad,
+			grb->video_dev.entity.name, RCM_VDU_GRB_SINK);
+
+	ret = media_create_pad_link(&grb->src_subdev->entity, grb->src_pad,
+				    &grb->video_dev.entity, RCM_VDU_GRB_SINK,
+				    MEDIA_LNK_FL_ENABLED |
+				    MEDIA_LNK_FL_IMMUTABLE);
+
+	if (ret) {
+		dev_err(grb->dev, "Couldn't create media link %d", ret);
+		return ret;
+	}
+
+	dev_dbg(grb->dev, "Media link with subdev %s was created\n", grb->src_subdev->name);
+
+	ret = v4l2_device_register_subdev_nodes(&grb->v4l2_dev);
+	if (ret < 0)
+		dev_err(grb->dev, "failed to register subdev nodes\n");
+
+	return media_device_register(&grb->media_dev);
+}
+
+static void grb_graph_notify_unbind(struct v4l2_async_notifier *notifier,
+				     struct v4l2_subdev *sd,
+				     struct v4l2_async_subdev *asd)
+{
+	struct grb_info *grb = notifier_to_grb(notifier);
+
+	/* Checks internally if video_dev have been init or not */
+	video_unregister_device(&grb->video_dev);
+
+	dev_info(grb->dev, "Removing %s\n", video_device_node_name(&grb->video_dev));
+}
+
+static int grb_graph_notify_bound(struct v4l2_async_notifier *notifier,
+				   struct v4l2_subdev *subdev,
+				   struct v4l2_async_subdev *unused)
+{
+	struct grb_info *grb = notifier_to_grb(notifier);
+
+	struct grb_graph_entity *entity;
+	struct v4l2_async_subdev *asd;
+
+	grb->src_subdev = subdev;
+	grb->src_pad = media_entity_get_fwnode_pad(&subdev->entity, subdev->fwnode, MEDIA_PAD_FL_SOURCE);
+	if (grb->src_pad < 0) {
+		dev_err(grb->dev, "Couldn't find output pad for subdev %s\n", subdev->name);
+		return grb->src_pad;
+	}
+
+
+	/* Locate the entity corresponding to the bound subdev and store the
+	 * subdev pointer.
+	 */
+	list_for_each_entry(asd, &grb->notifier.asd_list, asd_list) {
+		entity = to_grb_entity(asd);
+
+		if (entity->asd.match.fwnode != subdev->fwnode)
+			continue;
+
+		if (entity->subdev) {
+			dev_err(grb->dev, "duplicate subdev for node %p\n",
+				entity->asd.match.fwnode);
+			return -EINVAL;
+		}
+
+		dev_dbg(grb->dev, "subdev %s bound\n", subdev->name);
+		entity->entity = &subdev->entity;
+		entity->subdev = subdev;
+		return 0;
+	}
+
+	dev_err(grb->dev, "no entity for subdev %s\n", subdev->name);
+	return -EINVAL;
+}
+
+static const struct v4l2_async_notifier_operations grb_graph_notify_ops = {
+	.bound = grb_graph_notify_bound,
+	.unbind = grb_graph_notify_unbind,
+	.complete = grb_graph_notify_complete,
+};
+
+static int grb_graph_parse(struct grb_info *grb, struct device_node *node)
+{
+	struct device_node *ep = NULL;
+	struct device_node *remote;
+
+	ep = of_graph_get_next_endpoint(node, ep);
+	if (!ep) {
+		dev_err(grb->dev, "of_graph_get_next_endpoint failed\n");
+		return -EINVAL;
+	}
+
+	remote = of_graph_get_remote_port_parent(ep);
+	of_node_put(ep);
+	if (!remote) {
+		dev_err(grb->dev, "of_graph_get_remote_port_parent failed\n");
+		return -EINVAL;
+	}
+
+	/* Remote node to connect */
+	grb->entity.node = remote;
+	grb->entity.asd.match_type = V4L2_ASYNC_MATCH_FWNODE;
+	grb->entity.asd.match.fwnode = of_fwnode_handle(remote);
+	return 0;
+}
+
+static int grb_graph_init(struct grb_info *grb)
+{
+	int ret;
+
+	/* Parse the graph to extract a list of subdevice DT nodes. */
+	ret = grb_graph_parse(grb, grb->dev->of_node);
+	if (ret < 0) {
+		dev_err(grb->dev, "Graph parsing failed\n");
+		return ret;
+	}
+
+	v4l2_async_notifier_init(&grb->notifier);
+
+	ret = v4l2_async_notifier_add_subdev(&grb->notifier, &grb->entity.asd);
+	if (ret) {
+		dev_err(grb->dev, "v4l2_async_notifier_add_subdev failed\n");
+		of_node_put(grb->entity.node);
+		return ret;
+	}
+
+	grb->notifier.ops = &grb_graph_notify_ops;
+
+	ret = v4l2_async_notifier_register(&grb->v4l2_dev, &grb->notifier);
+	if (ret < 0) {
+		dev_err(grb->dev, "Notifier registration failed\n");
+		v4l2_async_notifier_cleanup(&grb->notifier);
+		return ret;
+	}
+
+	return 0;
 }
 
 static int get_memory_buffer_address( const struct platform_device* grb_device,  const char* res_name, struct resource* res_ptr ) {
@@ -1306,6 +1641,8 @@ static int get_resources( struct platform_device *grb_device, struct grb_info *g
 static int device_probe( struct platform_device *grb_device ) {
 	struct grb_info *grb_info_ptr;
 	int err;
+	void __iomem* base_addr;
+
 
 	grb_info_ptr = kzalloc(sizeof(struct grb_info), GFP_KERNEL);
 	if( grb_info_ptr == NULL ) {
@@ -1356,20 +1693,37 @@ static int device_probe( struct platform_device *grb_device ) {
 	grb_info_ptr->recognize_format.height = 480;
 	grb_info_ptr->recognize_format.field = V4L2_FIELD_NONE;
 
-	err = v4l2_device_register( grb_info_ptr->dev, &grb_info_ptr->v4l2_device );
+
+	grb_info_ptr->media_dev.dev = grb_info_ptr->dev;
+	strscpy(grb_info_ptr->media_dev.model, "RCM Video Capture Device",
+		sizeof(grb_info_ptr->media_dev.model));
+	grb_info_ptr->media_dev.hw_revision = 0;
+
+	media_device_init(&grb_info_ptr->media_dev);
+
+	grb_info_ptr->v4l2_dev.mdev = &grb_info_ptr->media_dev;
+
+	err = v4l2_device_register( grb_info_ptr->dev, &grb_info_ptr->v4l2_dev );
 	if (err) {
 		dev_err( grb_info_ptr->dev, "failed v4l2_device register %d\n", err );
-		goto err_free_mem;
+		goto err_media_clean;
 	}
-	grb_info_ptr->video_dev.v4l2_dev = &grb_info_ptr->v4l2_device;
+	grb_info_ptr->video_dev.v4l2_dev = &grb_info_ptr->v4l2_dev;
 	grb_info_ptr->video_dev.device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_STREAMING;
 
-	video_set_drvdata( &grb_info_ptr->video_dev , grb_info_ptr );
-	err = video_register_device( &grb_info_ptr->video_dev, VFL_TYPE_GRABBER, -1 );
-	if( err ) {
-		dev_err( grb_info_ptr->dev, "failed video_dev register %d\n", err );
+	grb_info_ptr->pad.flags = MEDIA_PAD_FL_SINK;
+	err = media_entity_pads_init(&grb_info_ptr->video_dev.entity, 1, &grb_info_ptr->pad);
+	if (err) {
+		dev_err( grb_info_ptr->dev, "failed media pad init %d\n", err );
 		goto err_release_dev;
 	}
+
+	video_set_drvdata( &grb_info_ptr->video_dev , grb_info_ptr );
+//	err = video_register_device( &grb_info_ptr->video_dev, VFL_TYPE_GRABBER, -1 );
+//	if( err ) {
+//		dev_err( grb_info_ptr->dev, "failed video_dev register %d\n", err );
+//		goto err_release_dev;
+//	}
 
 	err = request_irq( grb_info_ptr->num_irq, irq_handler, IRQF_SHARED, RCM_GRB_DEVICE_NAME, grb_info_ptr );
 	if( err ) {
@@ -1383,13 +1737,26 @@ static int device_probe( struct platform_device *grb_device ) {
 		goto err_release_dev;
 	}
 
+	err = grb_graph_init(grb_info_ptr);
+	if (err < 0) {
+		dev_err( grb_info_ptr->dev, "graph init failed\n" );
+		goto err_release_dev;
+	}
+
 	spin_lock_init( &grb_info_ptr->irq_lock );
 
 	dev_info( grb_info_ptr->dev, "probe succesfully completed (base %08x)\n", (u32)grb_info_ptr->phys_addr_regs_grb );
+
+	base_addr = grb_info_ptr->base_addr_regs_grb;
+
+	dump_all_regs("Dump regs after probe", base_addr);
+
 	return 0;
 
 err_release_dev:
 	video_unregister_device( &grb_info_ptr->video_dev ); 
+err_media_clean:
+	media_device_cleanup(&grb_info_ptr->media_dev);
 err_free_mem:
 	kfree( grb_info_ptr );
 	return err;
@@ -1405,6 +1772,8 @@ static int device_remove( struct platform_device* grb_device )
 	reset_grab( grb_info_ptr->base_addr_regs_grb );
 
 	video_unregister_device( &grb_info_ptr->video_dev );
+	media_device_unregister(&grb_info_ptr->media_dev);
+	media_device_cleanup(&grb_info_ptr->media_dev);
 
 	if( grb_info_ptr->num_irq )
 		free_irq( grb_info_ptr->num_irq, grb_info_ptr );
