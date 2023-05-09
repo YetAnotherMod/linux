@@ -363,6 +363,38 @@ config VIDEO_TC358743_CEC
 	  When selected the tc358743 will support the optional
 	  HDMI CEC feature.
 
+config VIDEO_TC358746A
+	tristate "Toshiba TC358746a CSI-2 to PARALLEL bridge"
+	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
+	depends on MEDIA_CAMERA_SUPPORT
+	select V4L2_FWNODE
+	help
+	  Support for Toshiba TC358746a CSI-2 to PARALLEL bridge.
+	  It is used to allow usage of CSI-2 sensor with PARALLEL port
+	  controller.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called tc358746a.
+
+config VIDEO_TC358748
+	tristate "Toshiba TC358748 CSI-2 to PARALLEL bridge"
+	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
+	depends on MEDIA_CAMERA_SUPPORT
+	select V4L2_FWNODE
+	help
+	  Support for Toshiba TC358748 CSI-2 to PARALLEL bridge.
+	  It is used to allow usage of CSI-2 sensor with PARALLEL port
+	  controller.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called tc358748.
+
+config TC358748_FAST_CALIBRATION
+	bool "Toshiba TC358748 fast calibration"
+	depends on VIDEO_TC358748
+	help
+	  Fast calibration
+
 config VIDEO_TVP514X
 	tristate "Texas Instruments TVP514x video decoder"
 	depends on VIDEO_V4L2 && I2C
