@@ -5,6 +5,8 @@
  * Copyright 2012 Analog Devices Inc.
  */
 
+//#define DEBUG 1
+
 #include <linux/clk.h>
 #include <linux/device.h>
 #include <linux/gpio/consumer.h>
@@ -21,6 +23,18 @@
 #include <drm/drm_probe_helper.h>
 
 #include "adv7511.h"
+
+
+#ifdef DEBUG
+	#define ADV7511_DBG_PRINT(...) printk( KERN_DEBUG "[ADV7511] " __VA_ARGS__ );
+#else
+	#define ADV7511_DBG_PRINT(...) while(0);
+#endif
+
+#define ADV7511_DBG_PRINT_PROC_CALL ADV7511_DBG_PRINT("%s\n",__FUNCTION__)
+#define ADV7511_DBG_PRINT_PROC_CALL_START ADV7511_DBG_PRINT("%s: Start\n",__FUNCTION__)
+#define ADV7511_DBG_PRINT_PROC_CALL_END ADV7511_DBG_PRINT("%s: End\n",__FUNCTION__)
+
 
 /* ADI recommended values for proper operation. */
 static const struct reg_sequence adv7511_fixed_registers[] = {
@@ -402,15 +416,19 @@ static bool adv7511_hpd(struct adv7511 *adv7511)
 	int ret;
 
 	ret = regmap_read(adv7511->regmap, ADV7511_REG_INT(0), &irq0);
-	if (ret < 0)
+	if (ret < 0) {
+		ADV7511_DBG_PRINT("%s: error read interrupt reg\n", __func__);
 		return false;
+	}
 
 	if (irq0 & ADV7511_INT0_HPD) {
 		regmap_write(adv7511->regmap, ADV7511_REG_INT(0),
 			     ADV7511_INT0_HPD);
+		//ADV7511_DBG_PRINT("%s: INT0_HPD is set\n", __func__);
 		return true;
 	}
 
+	//ADV7511_DBG_PRINT("%s: INT0_HPD is not set\n", __func__);
 	return false;
 }
 
@@ -422,12 +440,18 @@ static void adv7511_hpd_work(struct work_struct *work)
 	int ret;
 
 	ret = regmap_read(adv7511->regmap, ADV7511_REG_STATUS, &val);
-	if (ret < 0)
+	if (ret < 0) {
+		ADV7511_DBG_PRINT("%s: error read status reg\n", __func__);
 		status = connector_status_disconnected;
-	else if (val & ADV7511_STATUS_HPD)
+	}
+	else if (val & ADV7511_STATUS_HPD) {
+		ADV7511_DBG_PRINT("%s: hpd is set\n", __func__);
 		status = connector_status_connected;
-	else
+	}
+	else {
+		ADV7511_DBG_PRINT("%s: hpd is not set\n", __func__);
 		status = connector_status_disconnected;
+	}
 
 	/*
 	 * The bridge resets its registers on unplug. So when we get a plug
@@ -465,6 +489,10 @@ static int adv7511_irq_process(struct adv7511 *adv7511, bool process_hpd)
 	regmap_write(adv7511->regmap, ADV7511_REG_INT(0), irq0);
 	regmap_write(adv7511->regmap, ADV7511_REG_INT(1), irq1);
 
+	if(irq0 || irq1) {
+		ADV7511_DBG_PRINT("%s: irq0=0x%x, irq1=0x%x\n", __func__, irq0, irq1);
+	}
+
 	if (process_hpd && irq0 & ADV7511_INT0_HPD && adv7511->bridge.encoder)
 		schedule_work(&adv7511->hpd_work);
 
@@ -494,22 +522,50 @@ static irqreturn_t adv7511_irq_handler(int irq, void *devid)
 /* -----------------------------------------------------------------------------
  * EDID retrieval
  */
+#define DO_NOT_USE_EDID_SIM 0
 
+
+#if DO_NOT_USE_EDID_SIM == 0
+const u8 edid_sim[256] = {
+	0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x30, 0xAE, 0x86, 0x10, 0x01, 0x01, 0x01, 0x01, 
+	0x22, 0x15, 0x01, 0x03, 0x80, 0x29, 0x1A, 0x78, 0xEE, 0xE5, 0xB5, 0xA3, 0x55, 0x49, 0x99, 0x27, 
+	0x13, 0x50, 0x54, 0xAF, 0xEF, 0x00, 0x71, 0x4F, 0x81, 0xC0, 0x81, 0x80, 0x81, 0x80, 0x81, 0x80, 
+	0x95, 0x00, 0x95, 0x0F, 0xD1, 0xC0, 0x24, 0x13, 0x00, 0x20, 0x41, 0x58, 0x16, 0x20, 0x05, 0x0D, 
+	0x23, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x1C, 0x00, 0x00, 0x00, 0xFC, 0x00, 0x4C, 0x45, 0x4E, 
+	0x20, 0x4C, 0x31, 0x39, 0x35, 0x30, 0x77, 0x44, 0x0A, 0x20, 0x00, 0x00, 0x00, 0xFD, 0x00, 0x32, 
+	0x4C, 0x1E, 0x51, 0x0E, 0x00, 0x0A, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x00, 0x00, 0x00, 0xFF, 
+	0x00, 0x42, 0x33, 0x34, 0x33, 0x32, 0x38, 0x34, 0x35, 0x0A, 0x20, 0x20, 0x20, 0x20, 0x01, 0x01, 
+	0x02, 0x03, 0x21, 0x71, 0x4E, 0x06, 0x07, 0x02, 0x03, 0x15, 0x96, 0x11, 0x12, 0x13, 0x04, 0x14, 
+	0x05, 0x1F, 0x90, 0x23, 0x09, 0x07, 0x07, 0x83, 0x01, 0x00, 0x00, 0x65, 0x03, 0x0C, 0x00, 0x10, 
+	0x00, 0x8C, 0x0A, 0xD0, 0x90, 0x20, 0x40, 0x31, 0x20, 0x0C, 0x40, 0x55, 0x00, 0xB9, 0x88, 0x21, 
+	0x00, 0x00, 0x18, 0x01, 0x1D, 0x80, 0x18, 0x71, 0x1C, 0x16, 0x20, 0x58, 0x2C, 0x25, 0x00, 0xB9, 
+	0x88, 0x21, 0x00, 0x00, 0x9E, 0x01, 0x1D, 0x80, 0xD0, 0x72, 0x1C, 0x16, 0x20, 0x10, 0x2C, 0x25, 
+	0x80, 0xB9, 0x88, 0x21, 0x00, 0x00, 0x9E, 0x01, 0x1D, 0x00, 0xBC, 0x52, 0xD0, 0x1E, 0x20, 0xB8, 
+	0x28, 0x55, 0x40, 0xB9, 0x88, 0x21, 0x00, 0x00, 0x1E, 0x02, 0x3A, 0x80, 0xD0, 0x72, 0x38, 0x2D, 
+	0x40, 0x10, 0x2C, 0x45, 0x80, 0xB9, 0x88, 0x21, 0x00, 0x00, 0x1E, 0x00, 0x00, 0x00, 0x00, 0xD0
+};
+#endif
+
+#if DO_NOT_USE_EDID_SIM
 static int adv7511_wait_for_edid(struct adv7511 *adv7511, int timeout)
 {
 	int ret;
 
 	if (adv7511->i2c_main->irq) {
+		ADV7511_DBG_PRINT("%s: wait irq\n", __func__);
 		ret = wait_event_interruptible_timeout(adv7511->wq,
 				adv7511->edid_read, msecs_to_jiffies(timeout));
 	} else {
+		ADV7511_DBG_PRINT("%s: wait for\n", __func__);
 		for (; timeout > 0; timeout -= 25) {
 			ret = adv7511_irq_process(adv7511, false);
 			if (ret < 0)
 				break;
 
-			if (adv7511->edid_read)
+			if (adv7511->edid_read){
+				ADV7511_DBG_PRINT("%s: done (%d)\n", __func__, timeout);
 				break;
+			}
 
 			msleep(25);
 		}
@@ -517,36 +573,49 @@ static int adv7511_wait_for_edid(struct adv7511 *adv7511, int timeout)
 
 	return adv7511->edid_read ? 0 : -EIO;
 }
+#endif
 
 static int adv7511_get_edid_block(void *data, u8 *buf, unsigned int block,
 				  size_t len)
 {
 	struct adv7511 *adv7511 = data;
+#if DO_NOT_USE_EDID_SIM
 	struct i2c_msg xfer[2];
 	uint8_t offset;
 	unsigned int i;
 	int ret;
+#endif
 
 	if (len > 128)
 		return -EINVAL;
 
+	ADV7511_DBG_PRINT("%s: EDID reading... block=%d, len=%d\n", __func__, block, len);
+
 	if (adv7511->current_edid_segment != block / 2) {
+
+#if DO_NOT_USE_EDID_SIM
 		unsigned int status;
 
 		ret = regmap_read(adv7511->regmap, ADV7511_REG_DDC_STATUS,
 				  &status);
-		if (ret < 0)
+		if (ret < 0) {
+			ADV7511_DBG_PRINT("%s: failed to read DDC_STATUS (%d)\n", __func__, status);
 			return ret;
-
+		}
+		ADV7511_DBG_PRINT("%s: DDC status = %d\n", __func__, status);
 		if (status != 2) {
 			adv7511->edid_read = false;
 			regmap_write(adv7511->regmap, ADV7511_REG_EDID_SEGMENT,
 				     block);
 			ret = adv7511_wait_for_edid(adv7511, 200);
-			if (ret < 0)
+			if (ret < 0) {
+				ADV7511_DBG_PRINT("%s: wait_for_edid (%d)\n", __func__, ret);
 				return ret;
+			}
 		}
+#endif
 
+#if DO_NOT_USE_EDID_SIM
 		/* Break this apart, hopefully more I2C controllers will
 		 * support 64 byte transfers than 256 byte transfers
 		 */
@@ -573,7 +642,10 @@ static int adv7511_get_edid_block(void *data, u8 *buf, unsigned int block,
 			xfer[1].buf += 64;
 			offset += 64;
 		}
+#else
+		memcpy(adv7511->edid_buf, edid_sim, 256);
 
+#endif
 		adv7511->current_edid_segment = block / 2;
 	}
 
@@ -635,13 +707,19 @@ adv7511_detect(struct adv7511 *adv7511, struct drm_connector *connector)
 	int ret;
 
 	ret = regmap_read(adv7511->regmap, ADV7511_REG_STATUS, &val);
-	if (ret < 0)
+	if (ret < 0) {
+		ADV7511_DBG_PRINT("%s: read ADV7511_REG_STATUS failed (%d)\n", __func__, ret);
 		return connector_status_disconnected;
+	}
 
-	if (val & ADV7511_STATUS_HPD)
+	if (val & ADV7511_STATUS_HPD) {
 		status = connector_status_connected;
-	else
+		//ADV7511_DBG_PRINT("%s: HPD is high\n", __func__);
+	}
+	else {
 		status = connector_status_disconnected;
+		//ADV7511_DBG_PRINT("%s: HPD is low\n", __func__);
+	}
 
 	hpd = adv7511_hpd(adv7511);
 
@@ -651,12 +729,14 @@ adv7511_detect(struct adv7511 *adv7511, struct drm_connector *connector)
 	 * has to be reinitialized. */
 	if (status == connector_status_connected && hpd && adv7511->powered) {
 		regcache_mark_dirty(adv7511->regmap);
+		//ADV7511_DBG_PRINT("%s: power on and read modes\n", __func__);
 		adv7511_power_on(adv7511);
 		adv7511_get_modes(adv7511, connector);
 		if (adv7511->status == connector_status_connected)
 			status = connector_status_disconnected;
 	} else {
 		/* Renable HPD sensing */
+		//ADV7511_DBG_PRINT("%s: Renable HPD sensing\n", __func__);
 		regmap_update_bits(adv7511->regmap, ADV7511_REG_POWER2,
 				   ADV7511_REG_POWER2_HPD_SRC_MASK,
 				   ADV7511_REG_POWER2_HPD_SRC_BOTH);
@@ -686,6 +766,8 @@ static void adv7511_mode_set(struct adv7511 *adv7511,
 	if (adv7511->embedded_sync) {
 		unsigned int hsync_offset, hsync_len;
 		unsigned int vsync_offset, vsync_len;
+
+		ADV7511_DBG_PRINT("%s: embedded_sync\n", __func__);
 
 		hsync_offset = adj_mode->crtc_hsync_start -
 			       adj_mode->crtc_hdisplay;
@@ -721,20 +803,30 @@ static void adv7511_mode_set(struct adv7511 *adv7511,
 		enum adv7511_sync_polarity mode_hsync_polarity;
 		enum adv7511_sync_polarity mode_vsync_polarity;
 
+		ADV7511_DBG_PRINT("%s: not embedded_sync\n", __func__);
+
 		/**
 		 * If the input signal is always low or always high we want to
 		 * invert or let it passthrough depending on the polarity of the
 		 * current mode.
 		 **/
-		if (adj_mode->flags & DRM_MODE_FLAG_NHSYNC)
+		if (adj_mode->flags & DRM_MODE_FLAG_NHSYNC) {
+			ADV7511_DBG_PRINT("%s: hsync POLARITY_LOW\n", __func__);
 			mode_hsync_polarity = ADV7511_SYNC_POLARITY_LOW;
-		else
+		}
+		else {
+			ADV7511_DBG_PRINT("%s: hsync POLARITY_HIGH\n", __func__);
 			mode_hsync_polarity = ADV7511_SYNC_POLARITY_HIGH;
+		}
 
-		if (adj_mode->flags & DRM_MODE_FLAG_NVSYNC)
+		if (adj_mode->flags & DRM_MODE_FLAG_NVSYNC) {
+			ADV7511_DBG_PRINT("%s: vsync POLARITY_LOW\n", __func__);
 			mode_vsync_polarity = ADV7511_SYNC_POLARITY_LOW;
-		else
+		}
+		else {
+			ADV7511_DBG_PRINT("%s: vsync POLARITY_LOW\n", __func__);
 			mode_vsync_polarity = ADV7511_SYNC_POLARITY_HIGH;
+		}
 
 		if (adv7511->hsync_polarity != mode_hsync_polarity &&
 		    adv7511->hsync_polarity !=
@@ -853,15 +945,19 @@ static int adv7511_bridge_attach(struct drm_bridge *bridge)
 	int ret;
 
 	if (!bridge->encoder) {
-		DRM_ERROR("Parent encoder object not found");
+		ADV7511_DBG_PRINT("%s: Parent encoder object not found", __func__);
 		return -ENODEV;
 	}
 
-	if (adv->i2c_main->irq)
+	if (adv->i2c_main->irq) {
+		ADV7511_DBG_PRINT("%s: DRM_CONNECTOR_POLL_HPD\n", __func__);
 		adv->connector.polled = DRM_CONNECTOR_POLL_HPD;
-	else
+	}
+	else {
+		ADV7511_DBG_PRINT("%s: DRM_CONNECTOR_POLL_CONNECT | DRM_CONNECTOR_POLL_DISCONNECT\n", __func__);
 		adv->connector.polled = DRM_CONNECTOR_POLL_CONNECT |
 				DRM_CONNECTOR_POLL_DISCONNECT;
+	}
 
 	ret = drm_connector_init(bridge->dev, &adv->connector,
 				 &adv7511_connector_funcs,
@@ -878,8 +974,11 @@ static int adv7511_bridge_attach(struct drm_bridge *bridge)
 		ret = adv7533_attach_dsi(adv);
 
 	if (adv->i2c_main->irq)
+	{
+		ADV7511_DBG_PRINT("%s: Enable ADV7511_INT0_HPD\n", __func__);
 		regmap_write(adv->regmap, ADV7511_REG_INT_ENABLE(0),
 			     ADV7511_INT0_HPD);
+	}
 
 	return ret;
 }
@@ -1136,11 +1235,14 @@ static int adv7511_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
 	if (IS_ERR(adv7511->gpio_pd)) {
 		ret = PTR_ERR(adv7511->gpio_pd);
 		goto uninit_regulators;
+	} else {
+		dev_dbg(dev, "Power Down GPIO configured\n");
 	}
 
 	if (adv7511->gpio_pd) {
 		usleep_range(5000, 6000);
 		gpiod_set_value_cansleep(adv7511->gpio_pd, 0);
+		dev_dbg(dev, "Set Power Down GPIO to low\n");
 	}
 
 	adv7511->regmap = devm_regmap_init_i2c(i2c, &adv7511_regmap_config);
@@ -1220,6 +1322,7 @@ static int adv7511_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
 	adv7511->bridge.of_node = dev->of_node;
 
 	drm_bridge_add(&adv7511->bridge);
+	dev_dbg(dev, "ADV7511 %s: bridge added\n", __func__);
 
 	adv7511_audio_init(dev, adv7511);
 	return 0;
