@@ -287,12 +287,28 @@
 				#size-cells = <0>;
 				#sound-dai-cells = <0>;
 
-				simple-audio-card,dai-link@0 { // I2S0 - cs4384_0
+				simple-audio-card,dai-link@0 { // I2S0 - cs4344
 					reg = <0>;
 					format = "i2s";
 					compatible = "cirrus,cs4344";
-					cpu {
+					frame-master = <&cpu_dai>;
+					bitclock-master = <&cpu_dai>;
+
+					widgets =
+						"Line", "Line Out";
+
+					routing =
+						"Line Out", "LLOUT",
+						"Line Out", "RLOUT";
+
+					cpu_dai: cpu {
 						sound-dai = <&i2s0>;
+						dai-tdm-slot-num = <2>;
+						dai-tdm-slot-width = <32>;
+					};
+
+					codec {
+						sound-dai = <&codec_dummy>;
 					};
 
 				};
@@ -308,6 +324,13 @@
 				};
 
 			};
+
+			codec_dummy: codec_dummy {
+				compatible = "linux,snd-soc-dummy";
+				#sound-dai-cells = <0>;
+				status = "okay";
+			};
+
 		};
 
 		apb0 {
@@ -385,18 +408,3 @@
 		stdout-path = &uart0;
 	};
 };
-
-/* SRAM-NOR */
-// /include/ "mb115-02.dtsi"
-
-/* 100m Ethernet + NAND */
-// /include/ "mb115-03-100mbit.dtsi"
-
-/* Gigabit Ethernet + NAND */
-// /include/ "mb115-03-gbit.dtsi"
-
-/* AV ouput */
-///include/ "mb115-04.dtsi"
-
-/* VIDEO capture */
-// /include/ "mb115-05.dtsi"
