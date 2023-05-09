@@ -153,10 +153,21 @@
 #define CSI_START_REG			0x0518
 #define		STRT			BIT(0)
 
-static const struct v4l2_mbus_framefmt tc358748_def_fmt = {
-	.width		= 3280,
-	.height		= 2464,
+static const struct v4l2_mbus_framefmt tc358748_def_sink_fmt = {
+	.width		= 640,
+	.height		= 480,
 	.code		= MEDIA_BUS_FMT_SRGGB8_1X8,
+	.field		= V4L2_FIELD_NONE,
+	.colorspace	= V4L2_COLORSPACE_DEFAULT,
+	.ycbcr_enc	= V4L2_YCBCR_ENC_DEFAULT,
+	.quantization	= V4L2_QUANTIZATION_DEFAULT,
+	.xfer_func	= V4L2_XFER_FUNC_DEFAULT,
+};
+
+static const struct v4l2_mbus_framefmt tc358748_def_source_fmt = {
+	.width		= 640,
+	.height		= 480,
+	.code		= MEDIA_BUS_FMT_RGB888_1X24,
 	.field		= V4L2_FIELD_NONE,
 	.colorspace	= V4L2_COLORSPACE_DEFAULT,
 	.ycbcr_enc	= V4L2_YCBCR_ENC_DEFAULT,
@@ -207,7 +218,8 @@ struct tc358748_dev {
 
 	/* lock to protect all members below */
 	struct mutex lock;
-	struct v4l2_mbus_framefmt fmt;
+	struct v4l2_mbus_framefmt sink_fmt;
+	struct v4l2_mbus_framefmt source_fmt;
 
 #define TC358748_VB_MAX_SIZE		(511 * 32)
 #define TC358748_VB_DEFAULT_SIZE	 (32 * 32)
@@ -222,6 +234,7 @@ struct tc358748_dev {
 
 struct tc358748_format {
 	u32		code;
+	bool 	csi_format;
 	unsigned char	bpp;
 	/* Register values */
 	u8		pdformat; /* Peripheral Data Format */
@@ -548,11 +561,6 @@ static struct v4l2_subdev *tc358748_get_remote_sd(struct v4l2_subdev *sd)
 	return r_sd;
 }
 
-static void init_format(struct v4l2_mbus_framefmt *fmt)
-{
-	*fmt = tc358748_def_fmt;
-}
-
 static __u32 get_fmt_code(__u32 code)
 {
 	unsigned int i;
@@ -699,8 +707,10 @@ static int tc358748_apply_pll_config(struct tc358748_dev *bridge)
 		return err;
 
 	/* Don't touch the PLL if running */
-	if (FIELD_GET(PLL_EN, val) == 1)
+	if (FIELD_GET(PLL_EN, val) == 1) {
+		dev_dbg(dev, "PLL already running\n");
 		return 0;
+	}
 
 	/* Pre-div and Multiplicator have a internal +1 logic */
 	val = PLL_PRD(pre - 1) | PLL_FBD(mul - 1);
@@ -791,8 +801,8 @@ static unsigned long tc358748_find_pll_settings(struct tc358748_dev *bridge,
 		dev_warn(dev, "Request PLL freq:%lu, found PLL freq:%lu\n",
 			 fout, best_freq);
 
-	dev_dbg(dev, "Found PLL settings: freq:%lu prediv:%u multi:%u postdiv:%u\n",
-		best_freq, p_best, m_best, postdiv);
+	dev_dbg(dev, "Found PLL settings: refclk:%lu freq:%lu prediv:%u multi:%u postdiv:%u\n",
+		refclk, best_freq, p_best, m_best, postdiv);
 
 	return best_freq;
 }
@@ -916,21 +926,118 @@ static int tc358748_enable_csi_to_parallel(struct v4l2_subdev *sd)
 {
 	struct tc358748_dev *bridge = to_tc358748_dev(sd);
 	struct device *dev = bridge->sd.dev;
-
-	const struct tc358748_format *fmt;
-	struct v4l2_subdev_format  sfmt;
+#if 0
 	unsigned int lanes;
+#endif
+	const struct tc358748_format *sink_fmt;
+	const struct tc358748_format *source_fmt;
+	struct v4l2_subdev_format  sd_fmt;
 	struct v4l2_subdev *remote;
 	u32 val;
 	int err = 0;
-
-	lanes = bridge->rx.bus.mipi_csi2.num_data_lanes;
 
 	remote = tc358748_get_remote_sd(sd);
 	if (!remote) {
 		dev_err(dev, "unable to find remote subdev.\n");
 		return -ENODEV;
 	}
+
+	/* Get the format from the input */
+	sd_fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
+	sd_fmt.pad   = 0;
+
+	err = v4l2_subdev_call(remote, pad, get_fmt, NULL, &sd_fmt);
+	if (err) {
+		dev_err(dev, "unable to get fmt from subdev.\n");
+		return err;
+	}
+	sink_fmt = tc358748_get_format_by_code(TC358748_SINK, sd_fmt.format.code);
+	if (IS_ERR(sink_fmt)){
+		dev_err(dev, "Unsupported format code 0x%X.\n", sd_fmt.format.code);
+		return PTR_ERR(sink_fmt);
+	}
+	source_fmt = tc358748_get_format_by_code(TC358748_SOURCE, MEDIA_BUS_FMT_RGB888_1X24);
+	if (IS_ERR(source_fmt)){
+		dev_err(dev, "Unsupported format code 0x%X.\n", sd_fmt.format.code);
+		return PTR_ERR(source_fmt);
+	}
+
+
+#if 1
+
+	/*=========== PLL,Clock Setting ===========*/
+	err = tc358748_write(bridge, PLLCTL0_REG, 0x309F); //PLL Control Register 0 (PLL_PRD,PLL_FBD)
+	if (err) {
+		dev_err(dev, "unable to set PLLCTL0.\n");
+		return err;
+	}
+	err = tc358748_write(bridge, PLLCTL1_REG, 0x0C03); //PLL_FRS,PLL_LBWS, PLL oscillation enable
+	if (err) {
+		dev_err(dev, "unable to set PLLCTL1.\n");
+		return err;
+	}
+	fsleep(1000);
+	err = tc358748_write(bridge, PLLCTL1_REG, 0x0C13); //PLL_FRS,PLL_LBWS, PLL clock out enable
+	if (err) {
+		dev_err(dev, "unable to set PLLCTL1.\n");
+		return err;
+	}
+	err = tc358748_write(bridge, CLKCTL_REG, 0x0021); //CLK control register: Clock divider setting
+	if (err) {
+		dev_err(dev, "unable to set CLKCTL.\n");
+		return err;
+	}
+
+	/*=========== MCLK Output ===========*/
+	err = tc358748_write(bridge, MCLKCTL_REG, 0x0101); //MCLK duty setting
+	if (err) {
+		dev_err(dev, "unable to set MCLKCTL.\n");
+		return err;
+	}
+
+	/*=========== Format configuration, timing Setting ===========*/
+
+	/* After activating the remote device, we will start the auto-calibration */
+	val = 0x8010;
+	dev_dbg(dev, "PHYTIMDLY: 0x%x\n", val);
+	err = tc358748_write(bridge, PHYTIMDLY_REG, val); //PHY timing delay setting
+	if (err) {
+		dev_err(dev, "unable to set PHYTIMDLY.\n");
+		return err;
+	}
+
+	//val = bridge->vb_size / 32;
+	val = 0x0100;
+	dev_dbg(dev, "FIFOCTL: %u (0x%x)\n", val, val);
+	err = tc358748_write(bridge, FIFOCTL_REG, val); //FIFO control
+	if (err) {
+		dev_err(dev, "unable to set FIFOCTL.\n");
+		return err;
+	}
+	
+	val = sd_fmt.format.width * sink_fmt->bpp / 8;
+	dev_dbg(dev, "WORDCNT: %u (0x%x)\n", val, val);
+	err = tc358748_write(bridge, WORDCNT_REG, val); // Total number of bytes for each line/width
+	if (err) {
+		dev_err(dev, "unable to set WORDCNT\n");
+		return err;
+	}
+
+	err = tc358748_write(bridge, DATAFMT_REG, 0x0031); //Data format control
+	if (err) {
+		dev_err(dev, "unable to set DATAFMT.\n");
+		return err;
+	}
+	err = tc358748_write(bridge, CONFCTL_REG, 0x8045); //Configuration control
+	if (err) {
+		dev_err(dev, "unable to set CONFCTL.\n");
+		return err;
+	}
+	return 0;
+
+#else
+
+	lanes = bridge->rx.bus.mipi_csi2.num_data_lanes;
 
 	err = tc358748_apply_pll_config(bridge);
 	if (err) {
@@ -952,37 +1059,12 @@ static int tc358748_enable_csi_to_parallel(struct v4l2_subdev *sd)
 		return err;
 	}
 
-	/* Get the format from the input */
-	sfmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
-	sfmt.pad   = 0;
-
-	err = v4l2_subdev_call(remote, pad, get_fmt, NULL, &sfmt);
-	if (err) {
-		dev_err(dev, "unable to get fmt from subdev.\n");
-		return err;
-	}
-
-	fmt = tc358748_get_format_by_code(TC358748_SINK, sfmt.format.code);
-	if (IS_ERR(fmt)){
-		dev_err(dev, "Unsupported format code 0x%X.\n", sfmt.format.code);
-		return PTR_ERR(fmt);
-	}
-
 	/* Self defined CSI user data type id's are not supported yet */
 	val = PDFMT(fmt->pdformat);
 	dev_dbg(dev, "DATAFMT: 0x%x\n", val);
 	err = tc358748_write(bridge, DATAFMT_REG, val);
 	if (err) {
 		dev_err(dev, "unable to set DATAFMT\n");
-		return err;
-	}
-
-	/* Total number of bytes for each line/width */
-	val = sfmt.format.width * fmt->bpp / 8;
-	dev_dbg(dev, "WORDCNT: %u (0x%x)\n", val, val);
-	err = tc358748_write(bridge, WORDCNT_REG, val);
-	if (err) {
-		dev_err(dev, "unable to set WORDCNT\n");
 		return err;
 	}
 
@@ -1066,6 +1148,62 @@ static int tc358748_enable_csi_to_parallel(struct v4l2_subdev *sd)
 	}
 
 	return tc358748_set_bits(bridge, CONFCTL_REG, PPEN); //Parallel Port Enable
+#endif
+}
+
+
+static int tc358748_status(struct tc358748_dev *bridge)
+{
+	struct device *dev = bridge->sd.dev;
+	unsigned	 wait;
+	u32 rxdata;
+
+	/* Default to 30ms */
+	wait = 5000;
+	msleep(wait); /* In order to receive some packets */
+
+	dev_dbg(dev, "====================\n");
+	tc358748_read(bridge, PHYSTA_REG, &rxdata);
+	dev_dbg(dev, "PHYSTA=0x%X\n", rxdata);
+	tc358748_read(bridge, CSISTATUS_REG, &rxdata);
+	dev_dbg(dev, "CSISTATUS=0x%X\n", rxdata);
+	tc358748_read(bridge, CSIERREN_REG, &rxdata);
+	dev_dbg(dev, "CSIERREN=0x%X\n", rxdata);
+	tc358748_read(bridge, MDLSYNERR_REG, &rxdata);
+	dev_dbg(dev, "MDLSYNERR=0x%X\n", rxdata);
+	tc358748_read(bridge, CSIDID_REG, &rxdata);
+	dev_dbg(dev, "CSIDID=0x%X\n", rxdata);
+	tc358748_read(bridge, CSIDIDERR_REG, &rxdata);
+	dev_dbg(dev, "CSIDIDERR=0x%X\n", rxdata);
+	tc358748_read(bridge, CSIPKTLEN_REG, &rxdata);
+	dev_dbg(dev, "CSIPKTLEN=0x%X\n", rxdata);
+	tc358748_read(bridge, CSIRX_DPCTL_REG, &rxdata);
+	dev_dbg(dev, "CSIRX_DPCTL=0x%X\n", rxdata);
+
+	tc358748_read(bridge, FRMERRCNT_REG, &rxdata);
+	dev_dbg(dev, "FRMERRCNT=0x%X\n", rxdata);
+	tc358748_read(bridge, CRCERRCNT_REG, &rxdata);
+	dev_dbg(dev, "CRCERRCNT=0x%X\n", rxdata);
+	tc358748_read(bridge, CORERRCNT_REG, &rxdata);
+	dev_dbg(dev, "CORERRCNT=0x%X\n", rxdata);
+	tc358748_read(bridge, HDRERRCNT_REG, &rxdata);
+	dev_dbg(dev, "HDRERRCNT=0x%X\n", rxdata);
+	tc358748_read(bridge, EIDERRCNT_REG, &rxdata);
+	dev_dbg(dev, "EIDERRCNT=0x%X\n", rxdata);
+	tc358748_read(bridge, CTLERRCNT_REG, &rxdata);
+	dev_dbg(dev, "CTLERRCNT=0x%X\n", rxdata);
+	tc358748_read(bridge, SOTERRCNT_REG, &rxdata);
+	dev_dbg(dev, "SOTERRCNT=0x%X\n", rxdata);
+	tc358748_read(bridge, SYNERRCNT_REG, &rxdata);
+	dev_dbg(dev, "SYNERRCNT=0x%X\n", rxdata);
+	tc358748_read(bridge, MDLERRCNT_REG, &rxdata);
+	dev_dbg(dev, "MDLERRCNT=0x%X\n", rxdata);
+	tc358748_read(bridge, FIFOSTATUS_REG, &rxdata);
+	dev_dbg(dev, "FIFOSTATUS=0x%X\n", rxdata);
+
+	dev_dbg(dev, "====================\n");
+
+	return 0;
 }
 
 /* Loop through all delay value in order to find the working window. And then
@@ -1077,7 +1215,6 @@ static int tc358748_calibrate(struct tc358748_dev *bridge)
 	int			 first_dly = 0;
 	int			 state	   = 0;
 	unsigned	 error_wait;
-	unsigned	 error_num = 0;
 	unsigned	 dly;
 	u32 val, dsettle, csistatus, physta;
 
@@ -1098,7 +1235,6 @@ static int tc358748_calibrate(struct tc358748_dev *bridge)
 		//dev_dbg(dev, "dly=%d, CSISTATUS=0x%X, PHYSTA=0x%X\n", dly, csistatus, physta);
 
 		error = ((physta & 0x0055) != 0) || ((csistatus & 0x01FF) != 0);
-		if(error) error_num++;
 		/* We hit the first possible value of the PHYTIMDLY window */
 		if (!error && !state) {
 			/* In fast calibration mode, assume the window is ~10
@@ -1122,13 +1258,8 @@ static int tc358748_calibrate(struct tc358748_dev *bridge)
 		}
 	}
 
-	if(error_num) {
-		dev_err(dev, "Could not find a correct PHYTIMDLY value\n");
-		return -1;
-	}
-
-	dev_warn(dev, "Could not find a correct PHYTIMDLY value. All data was recieved without error\n");
-	return 0;
+	dev_err(dev, "Could not find a correct PHYTIMDLY value\n");
+	return -1;
 }
 
 static int tc358748_s_stream(struct v4l2_subdev *sd, int enable)
@@ -1165,7 +1296,8 @@ static int tc358748_s_stream(struct v4l2_subdev *sd, int enable)
 	if (ret)
 		goto out;
 
-	ret = tc358748_calibrate(bridge);
+	ret = tc358748_status(bridge);
+//	ret = tc358748_calibrate(bridge);
 
 out:
 	mutex_unlock(&bridge->lock);
@@ -1178,11 +1310,11 @@ static int tc358748_init_cfg(struct v4l2_subdev *sd,
 	struct v4l2_mbus_framefmt *fmt;
 
 	fmt = v4l2_subdev_get_try_format(sd, cfg, TC358748_SINK);
-	*fmt = tc358748_def_fmt;
+	*fmt = tc358748_def_sink_fmt;
 
 	fmt = v4l2_subdev_get_try_format(sd, cfg, TC358748_SOURCE);
-	*fmt = tc358748_def_fmt;
-	fmt->code = tc358748_src_mbus_code(tc358748_def_fmt.code);
+	*fmt = tc358748_def_source_fmt;
+	fmt->code = tc358748_src_mbus_code(tc358748_def_source_fmt.code);
 
 	return 0;
 }
@@ -1226,7 +1358,7 @@ static int tc358748_get_fmt(struct v4l2_subdev *sd,
 	if (format->which == V4L2_SUBDEV_FORMAT_TRY)
 		fmt = v4l2_subdev_get_try_format(remote, cfg, format->pad);
 	else
-		fmt = &bridge->fmt;
+		fmt = &bridge->source_fmt;
 
 	mutex_lock(&bridge->lock);
 
@@ -1247,7 +1379,7 @@ static void tc358748_set_fmt_source(struct v4l2_subdev *sd,
 	struct tc358748_dev *bridge = to_tc358748_dev(sd);
 
 	/* source pad mirror active sink pad */
-	format->format = bridge->fmt;
+	format->format = bridge->source_fmt;
 	/* but code may need to be converted */
 	format->format.code = serial_to_parallel_code(format->format.code);
 
@@ -1270,7 +1402,7 @@ static void tc358748_set_fmt_sink(struct v4l2_subdev *sd,
 	if (format->which == V4L2_SUBDEV_FORMAT_TRY)
 		fmt = v4l2_subdev_get_try_format(sd, cfg, format->pad);
 	else
-		fmt = &bridge->fmt;
+		fmt = &bridge->sink_fmt;
 
 	*fmt = format->format;
 }
@@ -1560,7 +1692,8 @@ static int tc358748_probe(struct i2c_client *client)
 	if (!bridge)
 		return -ENOMEM;
 
-	init_format(&bridge->fmt);
+	bridge->sink_fmt = tc358748_def_sink_fmt;
+	bridge->source_fmt = tc358748_def_source_fmt;
 
 	bridge->i2c_client = client;
 	v4l2_i2c_subdev_init(&bridge->sd, client, &tc358748_subdev_ops);
