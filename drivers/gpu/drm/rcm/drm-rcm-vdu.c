@@ -1461,8 +1461,12 @@ static int encoder_init(struct vdu_device *vdu)
 		return ret;
 
 	ret = drm_bridge_attach(&vdu->encoder, bridge, NULL);
-	if (ret)
+	if (ret) {
+		drm_encoder_cleanup(&vdu->encoder);
 		return ret;
+	}
+
+	dev_info(&vdu->pdev->dev, "encoder '%s' attached\n", vdu->encoder.name);
 
 	// allow connection with CRTC
 	vdu->encoder.possible_crtcs = drm_crtc_mask(&vdu->crtc);
