@@ -32,6 +32,7 @@
 #define GPIORIS 0x414
 #define GPIOMIS 0x418
 #define GPIOIC  0x41C
+#define GPIOAFSEL 0x420
 
 #define PL061_GPIO_NR	8
 
@@ -288,6 +289,7 @@ static int pl061_probe(struct amba_device *adev, const struct amba_id *id)
 	struct pl061 *pl061;
 	struct gpio_irq_chip *girq;
 	int ret, irq;
+	u8 gpioafsel;
 
 	pl061 = devm_kzalloc(dev, sizeof(*pl061), GFP_KERNEL);
 	if (pl061 == NULL)
@@ -349,6 +351,12 @@ static int pl061_probe(struct amba_device *adev, const struct amba_id *id)
 		return ret;
 
 	amba_set_drvdata(adev, pl061);
+
+	if (of_property_read_u8(dev->of_node, "gpioafsel", &gpioafsel) == 0) {
+		dev_info(dev, "write 0x%x to GPIOAFSEL register\n", gpioafsel);
+		writeb(gpioafsel, pl061->base + GPIOAFSEL);
+	}
+
 	dev_info(dev, "PL061 GPIO chip registered\n");
 
 	return 0;
