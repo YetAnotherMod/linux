@@ -47,7 +47,7 @@
 		clock-output-names = "refclk";
 	};
 
-	vdd_usb0: fixedregulator-usb0 {
+	vbus_usb0: vbus_usb0 {
 		compatible = "regulator-fixed";
 		regulator-name = "vbus_usb0";
 		regulator-min-microvolt = <5000000>;
@@ -58,7 +58,7 @@
 		gpio = <&gpio1 5 0>;
 	};
 
-	vdd_usb1: fixedregulator-usb1 {
+	vbus_usb1: vbus_usb1 {
 		compatible = "regulator-fixed";
 		regulator-name = "vbus_usb1";
 		regulator-min-microvolt = <5000000>;
@@ -69,7 +69,7 @@
 		gpio = <&gpio1 3 0>;
 	};
 
-	vdd_usb2: fixedregulator-usb2 {
+	vbus_usb2: vbus_usb2 {
 		compatible = "regulator-fixed";
 		regulator-name = "vbus_usb2";
 		regulator-min-microvolt = <5000000>;
@@ -102,6 +102,108 @@
 				status = "ok";
 				mac-address = [ EC 17 66 77 05 02 ];
 			};
+
+			lsif0_mgpio0: lsif0_mgpio0@0x3C040420 {
+				status = "disabled";
+			};
+
+			lsif0_mgpio1: lsif0_mgpio1@0x3C041420 {
+				status = "disabled";
+			};
+
+			lsif0_mgpio2: lsif0_mgpio2@0x3C042420 {
+				status = "disabled";
+			};
+
+			lsif0_mgpio3: lsif0_mgpio3@0x3C043420 {
+				status = "disabled";
+			};
+
+			gpio_mgpio0: gpio_mgpio0@0x3C040000 {
+				status = "ok";
+				#gpio-cells = <2>;
+				compatible = "arm,pl061", "arm,primecell";
+				gpio-controller;
+				reg = <0x3C040000 0x1000>;
+				interrupt-controller;
+				#interrupt-cells = <2>;
+				interrupt-parent = <&MPIC>;
+				interrupts = <104 0>;
+				clocks = <&pclk>;
+				clock-names = "apb_pclk";
+
+				gpioafsel = <0>; //set all GPIO to GPIO mode
+
+				gpio-line-names = "      [mgpio0-0]", "      [mgpio0-1]",
+								  "      [mgpio0-2]", "      [mgpio0-3]",
+								  "      [mgpio0-4]", "      [mgpio0-5]",
+								  "pin37 [mgpio0-6]", "      [mgpio0-7]";
+
+			};
+
+			gpio_mgpio1: gpio_mgpio1@0x3C041000 {
+				status = "ok";
+				#gpio-cells = <2>;
+				compatible = "arm,pl061", "arm,primecell";
+				gpio-controller;
+				reg = <0x3C041000 0x1000>;
+				interrupt-controller;
+				#interrupt-cells = <2>;
+				interrupt-parent = <&MPIC>;
+				interrupts = <110 0>;
+				clocks = <&pclk>;
+				clock-names = "apb_pclk";
+
+				gpioafsel = <0>; //set all GPIO to GPIO mode
+
+				gpio-line-names = "      [mgpio1-0]", "pin26 [mgpio1-1]",
+								  "pin36 [mgpio1-2]", "pin33 [mgpio1-3]",
+								  "      [mgpio1-4]", "      [mgpio1-5]",
+								  "pin24 [mgpio1-6]", "pin32 [mgpio1-7]";
+			};
+
+			gpio_mgpio2: gpio_mgpio2@0x3C042000 {
+				status = "ok";
+				#gpio-cells = <2>;
+				compatible = "arm,pl061", "arm,primecell";
+				gpio-controller;
+				reg = <0x3C042000 0x1000>;
+				interrupt-controller;
+				#interrupt-cells = <2>;
+				interrupt-parent = <&MPIC>;
+				interrupts = <111 0>;
+				clocks = <&pclk>;
+				clock-names = "apb_pclk";
+
+				gpioafsel = <0>; //set all GPIO to GPIO mode
+
+				gpio-line-names = "pin22 [mgpio2-0]", "pin29 [mgpio2-1]",
+								  "pin31 [mgpio2-2]", "pin15 [mgpio2-3]",
+								  "pin16 [mgpio2-4]", "pin13 [mgpio2-5]",
+								  "pin11 [mgpio2-6]", "      [mgpio2-7]";
+			};
+
+			gpio_mgpio3: gpio_mgpio3@0x3C043000 {
+				status = "ok";
+				#gpio-cells = <2>;
+				compatible = "arm,pl061", "arm,primecell";
+				gpio-controller;
+				reg = <0x3C043000 0x1000>;
+				interrupt-controller;
+				#interrupt-cells = <2>;
+				interrupt-parent = <&MPIC>;
+				interrupts = <109 0>;
+				clocks = <&pclk>;
+				clock-names = "apb_pclk";
+
+				gpioafsel = <0>; //set all GPIO to GPIO mode
+
+				gpio-line-names = "pin18 [mgpio3-0]", "      [mgpio3-1]",
+								  "pin07 [mgpio3-2]", "pin12 [mgpio3-3]",
+								  "      [mgpio3-4]", "      [mgpio3-5]",
+								  "      [mgpio3-6]", "      [mgpio3-7]";
+			};
+
 		};
 
 		lsif1 {
@@ -120,7 +222,7 @@
 					adi,input-style = <1>;
 					adi,input-justification = "evenly";
 
-					pd = <&gpio1 2 0>; /* Power Down */
+					pd-gpios = <&gpio1 2 0>; /* Power Down */
 
 					ports {
 						#address-cells = <1>;
