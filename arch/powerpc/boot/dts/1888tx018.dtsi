@@ -243,8 +243,8 @@
 
 			lsif0_mgpio0: lsif0_mgpio0@0x3C040420 {
 				compatible = "pinctrl-single";
-				reg = <0x3C040420 4>;
-				pinctrl-single,register-width = <32>;
+				reg = <0x3C040420 1>;
+				pinctrl-single,register-width = <8>;
 				pinctrl-single,function-mask = <0x1>;
 				#address-cells = <1>;
 				#size-cells = <0>;
@@ -266,8 +266,8 @@
 
 			lsif0_mgpio1: lsif0_mgpio1@0x3C041420 {
 				compatible = "pinctrl-single";
-				reg = <0x3C041420 4>;
-				pinctrl-single,register-width = <32>;
+				reg = <0x3C041420 1>;
+				pinctrl-single,register-width = <8>;
 				pinctrl-single,function-mask = <0x1>;
 				#address-cells = <1>;
 				#size-cells = <0>;
@@ -293,8 +293,8 @@
 
 			lsif0_mgpio2: lsif0_mgpio2@0x3C042420 {
 				compatible = "pinctrl-single";
-				reg = <0x3C042420 4>;
-				pinctrl-single,register-width = <32>;
+				reg = <0x3C042420 1>;
+				pinctrl-single,register-width = <8>;
 				pinctrl-single,function-mask = <0x1>;
 				#address-cells = <1>;
 				#size-cells = <0>;
@@ -316,8 +316,8 @@
 
 			lsif0_mgpio3: lsif0_mgpio3@0x3C043420 {
 				compatible = "pinctrl-single";
-				reg = <0x3C043420 4>;
-				pinctrl-single,register-width = <32>;
+				reg = <0x3C043420 1>;
+				pinctrl-single,register-width = <8>;
 				pinctrl-single,function-mask = <0x1>;
 				#address-cells = <1>;
 				#size-cells = <0>;
@@ -335,8 +335,8 @@
 
 			lsif0_mgpio4: lsif0_mgpio4@0x3C044420 {
 				compatible = "pinctrl-single";
-				reg = <0x3C044420 4>;
-				pinctrl-single,register-width = <32>;
+				reg = <0x3C044420 1>;
+				pinctrl-single,register-width = <8>;
 				pinctrl-single,function-mask = <0x1>;
 				#address-cells = <1>;
 				#size-cells = <0>;
@@ -371,8 +371,8 @@
 
 			lsif0_mgpio5: lsif0_mgpio5@0x3C045420 {
 				compatible = "pinctrl-single";
-				reg = <0x3C045420 4>;
-				pinctrl-single,register-width = <32>;
+				reg = <0x3C045420 1>;
+				pinctrl-single,register-width = <8>;
 				pinctrl-single,function-mask = <0x1>;
 				#address-cells = <1>;
 				#size-cells = <0>;
@@ -394,8 +394,8 @@
 
 			lsif0_mgpio6: lsif0_mgpio6@0x3C046420 {
 				compatible = "pinctrl-single";
-				reg = <0x3C046420 4>;
-				pinctrl-single,register-width = <32>;
+				reg = <0x3C046420 1>;
+				pinctrl-single,register-width = <8>;
 				pinctrl-single,function-mask = <0x1>;
 				#address-cells = <1>;
 				#size-cells = <0>;
@@ -417,8 +417,8 @@
 
 			lsif0_mgpio7: lsif0_mgpio7@0x3C047420 {
 				compatible = "pinctrl-single";
-				reg = <0x3C047420 4>;
-				pinctrl-single,register-width = <32>;
+				reg = <0x3C047420 1>;
+				pinctrl-single,register-width = <8>;
 				pinctrl-single,function-mask = <0x1>;
 				#address-cells = <1>;
 				#size-cells = <0>;
@@ -444,8 +444,8 @@
 
 			lsif0_mgpio8: lsif0_mgpio8@0x3C048420 {
 				compatible = "pinctrl-single";
-				reg = <0x3C048420 4>;
-				pinctrl-single,register-width = <32>;
+				reg = <0x3C048420 1>;
+				pinctrl-single,register-width = <8>;
 				pinctrl-single,function-mask = <0x1>;
 				#address-cells = <1>;
 				#size-cells = <0>;
@@ -463,8 +463,8 @@
 
 			lsif0_mgpio9: lsif0_mgpio9@0x3C049420 {
 				compatible = "pinctrl-single";
-				reg = <0x3C049420 4>;
-				pinctrl-single,register-width = <32>;
+				reg = <0x3C049420 1>;
+				pinctrl-single,register-width = <8>;
 				pinctrl-single,function-mask = <0x1>;
 				#address-cells = <1>;
 				#size-cells = <0>;
@@ -482,8 +482,8 @@
 
 			lsif0_mgpio10: lsif0_mgpio10@0x3C04A420 {
 				compatible = "pinctrl-single";
-				reg = <0x3C04A420 4>;
-				pinctrl-single,register-width = <32>;
+				reg = <0x3C04A420 1>;
+				pinctrl-single,register-width = <8>;
 				pinctrl-single,function-mask = <0x1>;
 				#address-cells = <1>;
 				#size-cells = <0>;
