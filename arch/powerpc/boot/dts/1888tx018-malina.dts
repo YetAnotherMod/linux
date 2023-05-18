@@ -47,37 +47,66 @@
 		clock-output-names = "refclk";
 	};
 
-	vbus_usb0: vbus_usb0 {
+	vsys_5v: vsys_5v {
+		status = "okay";
 		compatible = "regulator-fixed";
-		regulator-name = "vbus_usb0";
+		regulator-name = "vsys_5v";
+		regulator-type = "voltage";
 		regulator-min-microvolt = <5000000>;
 		regulator-max-microvolt = <5000000>;
 		regulator-boot-on;
 		enable-active-low;
-		//vin-supply = <&vsys_5v>;
-		gpio = <&gpio1 5 0>;
 	};
 
-	vbus_usb1: vbus_usb1 {
-		compatible = "regulator-fixed";
-		regulator-name = "vbus_usb1";
-		regulator-min-microvolt = <5000000>;
-		regulator-max-microvolt = <5000000>;
-		regulator-boot-on;
-		enable-active-low;
-		//vin-supply = <&vsys_5v>;
-		gpio = <&gpio1 3 0>;
-	};
+	regulators {
+		compatible = "simple-bus";
+		#address-cells = <1>;
+		#size-cells = <0>;
 
-	vbus_usb2: vbus_usb2 {
-		compatible = "regulator-fixed";
-		regulator-name = "vbus_usb2";
-		regulator-min-microvolt = <5000000>;
-		regulator-max-microvolt = <5000000>;
-		regulator-boot-on;
-		enable-active-low;
-		//vin-supply = <&vsys_5v>;
-		gpio = <&gpio1 4 0>;
+		vbus_usb0: vbus_usb0@0 {
+			status = "okay";
+			reg = <0>;
+			compatible = "regulator-fixed";
+			regulator-name = "vbus_usb0";
+			regulator-type = "voltage";
+			regulator-min-microvolt = <5000000>;
+			regulator-max-microvolt = <5000000>;
+			enable-active-low;
+			regulator-always-on;
+			startup-delay-us = <0>;
+			vin-supply = <&vsys_5v>;
+			gpio = <&gpio1 5 0>;
+		};
+
+		vbus_usb1: vbus_usb1@1 {
+			status = "okay";
+			reg = <1>;
+			compatible = "regulator-fixed";
+			regulator-name = "vbus_usb1";
+			regulator-type = "voltage";
+			regulator-min-microvolt = <5000000>;
+			regulator-max-microvolt = <5000000>;
+			enable-active-low;
+			regulator-always-on;
+			startup-delay-us = <1000000>;
+			vin-supply = <&vsys_5v>;
+			gpio = <&gpio1 3 0>;
+		};
+
+		vbus_usb2: vbus_usb2@2 {
+			status = "okay";
+			reg = <2>;
+			compatible = "regulator-fixed";
+			regulator-name = "vbus_usb2";
+			regulator-type = "voltage";
+			regulator-min-microvolt = <5000000>;
+			regulator-max-microvolt = <5000000>;
+			enable-active-low;
+			regulator-always-on;
+			startup-delay-us = <2000000>;
+			vin-supply = <&vsys_5v>;
+			gpio = <&gpio1 4 0>;
+		};
 	};
 
 	plb {
@@ -370,10 +399,14 @@
 
 			gpio0: gpio0@0x3C065000 {
 				status = "ok";
+				gpio-line-names = "SYS_BOOT0", "SYS_BOOT1", "BIST MODE", "HOST MODE",
+								  "EDCL LOCK", "SYS_BOOT5", "SYS_BOOT6", "SYS_BOOT7";
 			};
 
 			gpio1: gpio1@0x3C066000 {
 				status = "ok";
+				gpio-line-names = "SYS_BOOT8", "CARD_DETECT", "HDMI_PD", "USB_VBUS_EN1",
+								  "USB_VBUS_EN2", "USB_VBUS_EN0", "PCIE_M2_RSTn0", "PCIE_M2_RSTn1";
 			};
 
 			usb_otg_hs: usb_otg_hs@0x3C06D000 {
