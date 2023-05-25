@@ -44,6 +44,7 @@ struct pl061_context_save_regs {
 	u8 gpio_ibe;
 	u8 gpio_iev;
 	u8 gpio_ie;
+	u8 gpio_afsel;
 };
 #endif
 
@@ -353,8 +354,15 @@ static int pl061_probe(struct amba_device *adev, const struct amba_id *id)
 	amba_set_drvdata(adev, pl061);
 
 	if (of_property_read_u8(dev->of_node, "gpioafsel", &gpioafsel) == 0) {
+		unsigned long flags;
+		u8 gpioafsel_rd = 0;
+
+		raw_spin_lock_irqsave(&pl061->lock, flags);
+		gpioafsel_rd = readb(pl061->base + GPIOAFSEL);
+		dev_info(dev, "GPIOAFSEL was 0x%x \n", gpioafsel_rd);
 		dev_info(dev, "write 0x%x to GPIOAFSEL register\n", gpioafsel);
 		writeb(gpioafsel, pl061->base + GPIOAFSEL);
+		raw_spin_unlock_irqrestore(&pl061->lock, flags);
 	}
 
 	dev_info(dev, "PL061 GPIO chip registered\n");
@@ -374,6 +382,7 @@ static int pl061_suspend(struct device *dev)
 	pl061->csave_regs.gpio_ibe = readb(pl061->base + GPIOIBE);
 	pl061->csave_regs.gpio_iev = readb(pl061->base + GPIOIEV);
 	pl061->csave_regs.gpio_ie = readb(pl061->base + GPIOIE);
+	pl061->csave_regs.gpio_afsel = readb(pl061->base + GPIOAFSEL);
 
 	for (offset = 0; offset < PL061_GPIO_NR; offset++) {
 		if (pl061->csave_regs.gpio_dir & (BIT(offset)))
@@ -398,6 +407,7 @@ static int pl061_resume(struct device *dev)
 			pl061_direction_input(&pl061->gc, offset);
 	}
 
+	writeb(pl061->csave_regs.gpio_afsel, pl061->base + GPIOAFSEL);
 	writeb(pl061->csave_regs.gpio_is, pl061->base + GPIOIS);
 	writeb(pl061->csave_regs.gpio_ibe, pl061->base + GPIOIBE);
 	writeb(pl061->csave_regs.gpio_iev, pl061->base + GPIOIEV);
