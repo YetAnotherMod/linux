@@ -117,15 +117,19 @@ static int rcm_thermal_read_temp(void *data, int *temp)
 	val0 = read_term_reg(therminfo->regs->tavg);
 
 	//  take avarage by 3 sensors 
-	val = ((val0 & 0x3FF) + ((val0 >> 10) & 0x3FF) + ((val0 >> 20) & 0x3FF));
+	//val = ((val0 & 0x3FF) + ((val0 >> 10) & 0x3FF) + ((val0 >> 20) & 0x3FF));
+
+//	val = ((val0 & 0x3FF) + ((val0 >> 10) & 0x3FF) + ((val0 >> 20) & 0x3FF));
+
+	val = ((val0 & 0x3FF) + ((val0 >> 10) & 0x3FF));
 
 #ifdef DEBUG
 	printk("tvag: %d, %d, %d\n", (val0 & 0x3FF), ((val0 >> 10) & 0x3FF), ((val0 >> 20) & 0x3FF));
 #endif
 
-	if(val < 390*3)
+	if(val < 390*2)
 		*temp = 125000;
-	else if(val > 650*3)
+	else if(val > 650*2)
 		*temp = -40000;
 	else
 	{
@@ -139,7 +143,7 @@ static int rcm_thermal_read_temp(void *data, int *temp)
 		*temp = temp_table[i+1]*1000;
 #else		
 
-		*temp = ((65000000*3 - val*100000)/473 + -40000);
+		*temp = ((65000000*2 - val*100000)/473 + -40000);
 #endif		
 	}
 
