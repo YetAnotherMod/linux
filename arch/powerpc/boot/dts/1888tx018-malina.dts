@@ -587,9 +587,9 @@
 
 			cpufreq: cpufreq@0x38006000 {
 				status = "ok";
-				      // freq      fb pre post div
-				freqs = <200000     32  1   2    0>,
-				        <400000     32  1   1    0>,
+				      // freq       fb pre post div
+				freqs = <266667     64  1   1    2>,
+						<400000     64  1   1    1>,
 				        <800000     64  1   1    0>;
 
 			};
