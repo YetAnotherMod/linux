@@ -10,6 +10,7 @@
  * version 2, as published by the Free Software Foundation.
  */
 
+#include <linux/debugfs.h>
 #include <linux/irq.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
@@ -57,6 +58,8 @@ struct rcm_therm_info {
 	struct thermal_zone_device	*tz_device;
 	int temp_irq;
 	int voltage_irq;
+	struct dentry *debug_root;
+	struct dentry *debug;
 };
 
 static const int temp_table[] = {
@@ -96,9 +99,6 @@ static const int temp_table[] = {
 	390	,	125	,
 };
 
-
-
-
 /**
  * rcm_thermal_read_temp: Read temperatue.
  * @data:	Device specific data.
@@ -118,8 +118,6 @@ static int rcm_thermal_read_temp(void *data, int *temp)
 
 	//  take avarage by 3 sensors 
 	//val = ((val0 & 0x3FF) + ((val0 >> 10) & 0x3FF) + ((val0 >> 20) & 0x3FF));
-
-//	val = ((val0 & 0x3FF) + ((val0 >> 10) & 0x3FF) + ((val0 >> 20) & 0x3FF));
 
 	val = ((val0 & 0x3FF) + ((val0 >> 10) & 0x3FF));
 
@@ -141,10 +139,9 @@ static int rcm_thermal_read_temp(void *data, int *temp)
 				break;
 		}
 		*temp = temp_table[i+1]*1000;
-#else		
-
-		*temp = ((65000000*2 - val*100000)/473 + -40000);
-#endif		
+#else
+		*temp = ((65000000*2 - val*100000)/315 + -40000);
+#endif
 	}
 
 #ifdef DEBUG
@@ -178,6 +175,72 @@ static irqreturn_t rcm_thermal_irq(int irq, void *data)
 
 	return IRQ_HANDLED;
 }
+
+#ifdef CONFIG_DEBUG_FS
+static int regs_show(struct seq_file *s, void *data)
+{
+	struct platform_device *pdev = s->private;
+	struct rcm_therm_info *therminfo = platform_get_drvdata(pdev);
+	unsigned int val, val0;
+	int temp;
+
+	val0 = read_term_reg(therminfo->regs->tavg);
+	val = ((val0 & 0x3FF) + ((val0 >> 10) & 0x3FF));
+	if(val < 390*2)
+		temp = 125000;
+	else if(val > 650*2)
+		temp = -40000;
+	else
+	{
+#ifdef TABLE_METHOD
+		int i;
+		for(i = 0; i < (sizeof(temp_table) - 1); i+=2)
+		{
+			if(val > temp_table[i])
+				break;
+		}
+		*temp = temp_table[i+1]*1000;
+#else
+		temp = ((65000000*2 - val*100000)/315 + -40000);
+#endif
+	}
+
+	seq_printf(s, "--- temp*1000: %d, from (0x%X, %d)\n", temp, val, val);
+	seq_printf(s, "tvag:      0x%X (%d, %d, %d)\n", val0, (val0 & 0x3FF), ((val0 >> 10) & 0x3FF), ((val0 >> 20) & 0x3FF));
+	seq_printf(s, "tctrl_avg: 0x%X\n", read_term_reg(therminfo->regs->tctrl_avg));
+	seq_printf(s, "tgrad:     0x%X\n", read_term_reg(therminfo->regs->tgrad));
+	seq_printf(s, "thigh:     0x%X\n", read_term_reg(therminfo->regs->thigh));
+	seq_printf(s, "tlow:      0x%X\n", read_term_reg(therminfo->regs->tlow));
+	seq_printf(s, "tint:      0x%X\n", read_term_reg(therminfo->regs->tint));
+	seq_printf(s, "tint_mask: 0x%X\n", read_term_reg(therminfo->regs->tint_mask));
+	seq_printf(s, "tsens:     0x%X\n", read_term_reg(therminfo->regs->tsens));
+	seq_printf(s, "ttmode:    0x%X\n", read_term_reg(therminfo->regs->ttmode));
+	seq_printf(s, "ttint:     0x%X\n", read_term_reg(therminfo->regs->ttint));
+	seq_printf(s, "tid:       0x%X\n", read_term_reg(therminfo->regs->tid));
+	seq_printf(s, "tstart:    0x%X\n", read_term_reg(therminfo->regs->tstart));
+
+	return 0;
+}
+
+DEFINE_SHOW_ATTRIBUTE(regs);
+
+static void rcm_thermal_debug_init(struct platform_device *pdev)
+{
+	struct rcm_therm_info *therminfo = platform_get_drvdata(pdev);
+	struct dentry *root;
+
+	root = debugfs_lookup("rcm_thermal", NULL);
+	if (!root)
+		therminfo->debug_root = debugfs_create_dir("rcm_thermal", NULL);
+	else
+		therminfo->debug_root = root;
+
+	therminfo->debug = debugfs_create_dir(dev_name(&pdev->dev), therminfo->debug_root);
+	debugfs_create_file("reg_contents", 0644, therminfo->debug, pdev, &regs_fops);
+}
+#else
+static inline void rcm_thermal_debug_init(struct platform_device *pdev) {}
+#endif
 
 static int rcm_thermal_probe(struct platform_device *pdev)
 {
@@ -229,17 +292,20 @@ static int rcm_thermal_probe(struct platform_device *pdev)
 	// TODO AstroSoft: fix on workable HW
 	// write_term_reg(0x0, therminfo->regs->tint_mask);
 
+	/* register of thermal sensor and get info from DT */
 	therminfo->tz_device = devm_thermal_zone_of_sensor_register(&pdev->dev, 0,
 				therminfo, &rcm_thermal_ops);
 
 	if (IS_ERR(therminfo->tz_device)) {
 		ret = PTR_ERR(therminfo->tz_device);
-		dev_err(&pdev->dev, "Failed to register thermal zone: %d\n",
-			ret);
+		dev_err(&pdev->dev, "Failed to register thermal zone: %d\n", ret);
 		return ret;
 	}
+	dev_info(&pdev->dev, "thermal zone sensor registered\n");
 
 	platform_set_drvdata(pdev, therminfo);
+
+	rcm_thermal_debug_init(pdev);
 
 	return 0;
 
@@ -255,6 +321,8 @@ errMemMapped:
 static int rcm_thermal_remove(struct platform_device *pdev)
 {
 	struct rcm_therm_info *therminfo = platform_get_drvdata(pdev);
+
+	debugfs_remove_recursive(therminfo->debug_root);
 
 	free_irq(therminfo->voltage_irq, (void *)therminfo->dev);
 	free_irq(therminfo->temp_irq, (void *)therminfo->dev);
