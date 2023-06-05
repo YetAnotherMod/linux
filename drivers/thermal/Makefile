@@ -55,4 +55,5 @@ obj-$(CONFIG_GENERIC_ADC_THERMAL)	+= thermal-generic-adc.o
 obj-$(CONFIG_ZX2967_THERMAL)	+= zx2967_thermal.o
 obj-$(CONFIG_UNIPHIER_THERMAL)	+= uniphier_thermal.o
 obj-$(CONFIG_AMLOGIC_THERMAL)     += amlogic_thermal.o
-obj-$(CONFIG_RCM_THERMAL)	+= rcm_thermal.o rcm_thermal_v2.o
+obj-$(CONFIG_RCM_THERMAL)	+= rcm_thermal.o
+obj-$(CONFIG_RCM_THERMAL2)	+= rcm_thermal_v2.o

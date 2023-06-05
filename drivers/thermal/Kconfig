@@ -311,7 +311,16 @@ config DOVE_THERMAL
 
 config RCM_THERMAL
 	tristate "Temperature sensor on RCM SoCs"
-	depends on PPC || ARCH_RCM_ARM || COMPILE_TEST
+	depends on PPC || COMPILE_TEST
+	depends on HAS_IOMEM
+	depends on OF
+	help
+	  Support for the RCM thermal sensor driver in the Linux thermal
+	  framework.
+
+config RCM_THERMAL2
+	tristate "Temperature sensor on RCM SoCs"
+	depends on ARCH_RCM_ARM || COMPILE_TEST
 	depends on HAS_IOMEM
 	depends on OF
 	help
