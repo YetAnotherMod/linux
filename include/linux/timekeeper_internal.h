@@ -138,6 +138,10 @@ struct timekeeper {
 #endif
 };
 
+#ifdef CONFIG_1888TX018
+void timekeeping_recalc_internals(void);
+#endif
+
 #ifdef CONFIG_GENERIC_TIME_VSYSCALL
 
 extern void update_vsyscall(struct timekeeper *tk);

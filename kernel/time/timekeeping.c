@@ -2402,3 +2402,25 @@ void xtime_update(unsigned long ticks)
 	write_sequnlock(&jiffies_lock);
 	update_wall_time();
 }
+
+#ifdef CONFIG_1888TX018
+void timekeeping_recalc_internals(void)
+{
+	struct timekeeper *tk = &tk_core.timekeeper;
+	struct clocksource *clock;
+	unsigned long flags;
+
+	raw_spin_lock_irqsave(&timekeeper_lock, flags);
+	write_seqcount_begin(&tk_core.seq);
+
+	timekeeping_forward_now(tk);
+	clock = tk->tkr_mono.clock;
+	tk_setup_internals(tk, clock);
+	timekeeping_update(tk, TK_CLEAR_NTP | TK_MIRROR | TK_CLOCK_WAS_SET);
+
+	write_seqcount_end(&tk_core.seq);
+	raw_spin_unlock_irqrestore(&timekeeper_lock, flags);
+
+	return;
+}
+#endif
