@@ -465,6 +465,8 @@ void clockevents_register_device(struct clock_event_device *dev)
 	tick_check_new_device(dev);
 	clockevents_notify_released();
 
+	printk(KERN_INFO "Clockevents device '%s' registered\n", dev->name);
+
 	raw_spin_unlock_irqrestore(&clockevents_lock, flags);
 }
 EXPORT_SYMBOL_GPL(clockevents_register_device);
