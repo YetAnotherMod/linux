@@ -24,18 +24,21 @@
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
 #include <linux/of_platform.h>
-
+#include <linux/bch.h>
 
 #include <linux/mtd/mnand.h>
 #include "../nand/raw/internals.h" // v5.5.0: nand_get_manufacturer
 
 #define DRIVER_NAME "mnand"
+#define CONFIG_MNAND_PARANOID_ECC_MAXBYTES 39
 
 #define MNAND_DECLARE_PARAM(name, def) \
 	static int g_mnand_##name = def; \
 	module_param_named(name, g_mnand_##name, int, 0);
 
 MNAND_DECLARE_PARAM(debug, 0);
+MNAND_DECLARE_PARAM(use_soft_paranoid_bch, 0); //Needed for BCH ECC
+
 
 #define TRACE(level, format, ... ) \
 	do { \
@@ -88,7 +91,17 @@ struct mnand_chip {
 
         uint32_t ecc_corrected;
         uint32_t ecc_failed;
+	uint32_t ecc_maxflips_per_read;
 	uint64_t chip_size[2];
+
+	struct bch_control   *bch;
+	unsigned int         *errloc;
+	unsigned int   paranoid_ecc_size;
+	unsigned int   paranoid_ecc_bytes;
+	unsigned int   paranoid_ecc_strength;
+	unsigned char *paranoid_ecc_mask;
+	unsigned char *paranoid_ecc_buf;
+
 
 } static g_chip;
 
@@ -125,10 +138,10 @@ static int nand_ooblayout_ecc(struct mtd_info *mtd, int section,
 		return -ERANGE;
 
 	/*
-	 * byte 1-24 are ECC
+	 * byte 1-24 are HWECC, everything else is used for BCH ecc
 	 */
 	oobregion->offset = 1;
-	oobregion->length = 24;
+	oobregion->length = 63;
 
 	return 0;
 }
@@ -136,6 +149,8 @@ static int nand_ooblayout_ecc(struct mtd_info *mtd, int section,
 static int nand_ooblayout_free(struct mtd_info *mtd, int section,
 			       struct mtd_oob_region *oobregion)
 {
+#if 0
+
 	if (section > 1)
 		return -ERANGE;
 
@@ -146,8 +161,8 @@ static int nand_ooblayout_free(struct mtd_info *mtd, int section,
 		oobregion->offset = 25;
 		oobregion->length = 39;
 	}
-
-	return 0;
+#endif
+	return -ERANGE;
 }
 
 static const struct mtd_ooblayout_ops nand_ooblayout_ops = {
@@ -358,6 +373,114 @@ int mnand_ready(void)
         return (mnand_get(0) & 0x200) != 0;
 }
 
+static inline unsigned char* mnand_get_spare_ecc_paranoid(struct mtd_info *mtd) 
+{
+	uint32_t ecc_offset = mtd->writesize + 25; //FixMe: Magic numberz. This is bad
+	return g_chip.dma_area + ecc_offset;
+}
+
+
+void mnand_paranoid_mask_ecc(unsigned char *code) {
+	unsigned int i;
+	/* apply mask so that an erased page is a valid codeword */
+	for (i = 0; i < g_chip.paranoid_ecc_bytes; i++)
+		code[i] ^= g_chip.paranoid_ecc_mask[i];
+}
+
+int mnand_paranoid_calculate_ecc(struct mtd_info *mtd, const unsigned char *buf,
+			   unsigned char *code)
+{
+
+	memset(code, 0, g_chip.paranoid_ecc_bytes);
+	encode_bch(g_chip.bch, buf, g_chip.paranoid_ecc_size, code);
+	mnand_paranoid_mask_ecc(code);	
+	return 0;
+}
+
+int mnand_correct_paranoid(struct mtd_info *mtd, unsigned char *buf, unsigned char *read_ecc)
+{
+	unsigned int *errloc = g_chip.errloc;
+	int i, count;
+
+	mnand_paranoid_mask_ecc(read_ecc); //unmask ecc
+	count = decode_bch(g_chip.bch, buf, g_chip.paranoid_ecc_size, read_ecc, NULL,
+			   NULL, errloc);
+
+	if (count > 0) {
+		for (i = 0; i < count; i++) {
+			if (errloc[i] < (g_chip.paranoid_ecc_size*8))
+				/* error is located in data, correct it */
+				buf[errloc[i] >> 3] ^= (1 << (errloc[i] & 7));
+		}
+	} else if (count < 0) {
+		printk(KERN_ERR "mnand: paranoid bch failed with result: %d\n", count);
+		count = -1;
+	}
+	return count;
+}
+
+int mnand_attach_paranoid_bch(struct mtd_info* mtd)
+{
+	unsigned int m, t, eccsteps;
+	unsigned int eccsize = mtd->writesize;
+	unsigned int eccbytes = 0;
+	unsigned int eccstrength = 0;
+        void *epage = NULL;
+	int i;
+
+	eccsteps = mtd->writesize / eccsize;
+	/* Find most strong ecc possible, given free oob size*/
+	while (eccbytes * eccsteps < CONFIG_MNAND_PARANOID_ECC_MAXBYTES) {
+		eccstrength++;
+		eccbytes = DIV_ROUND_UP(eccstrength * fls(8 * eccsize), 8);		
+	}
+
+	eccstrength--;
+	eccbytes = DIV_ROUND_UP(eccstrength * fls(8 * eccsize), 8);
+	g_chip.paranoid_ecc_strength = eccstrength;	
+
+        if (g_mnand_use_soft_paranoid_bch) {
+                mtd->ecc_strength = eccstrength;
+                mtd->bitflip_threshold = eccstrength - (mtd->ecc_strength / 5); // 75% of correctable threshold, as recommended
+        } else {
+                mtd->ecc_strength = 1;
+                mtd->bitflip_threshold = 1; //Otherwise 1 bitflip is a recommendation to evacuate all the data
+        }
+
+        if (g_mnand_use_soft_paranoid_bch) {
+                /* Silence printk's here */
+	        printk(KERN_INFO "mnand: Attaching additional redundant software ECC. Performance may be affected\n");
+	        printk(KERN_INFO "mnand: eccbytes %d (%d). strength: %d, bitflip_threshold: %d\n", 
+                        eccbytes, 
+                        eccbytes * eccsteps, 
+                        eccstrength, 
+                        mtd->bitflip_threshold);
+        }
+
+	m = fls(1+8*eccsize);
+	t = (eccbytes*8)/m;
+	printk(KERN_INFO "mnand: Calculated BCH  params M=%d T=%d\n", m, t);
+
+	g_chip.bch = init_bch(m, t, 0);
+	g_chip.errloc = kmalloc(t*sizeof(*g_chip.errloc), GFP_KERNEL);
+	g_chip.paranoid_ecc_size  = eccsize;
+	g_chip.paranoid_ecc_bytes = eccbytes;
+	g_chip.paranoid_ecc_mask = kmalloc(g_chip.paranoid_ecc_bytes, GFP_KERNEL);
+
+	memset(g_chip.paranoid_ecc_mask, 0x0, eccbytes);
+
+	epage = kmalloc(eccsize, GFP_KERNEL);
+	memset(epage, 0xff, eccsize);	
+	encode_bch(g_chip.bch, epage, eccsize, g_chip.paranoid_ecc_mask);
+	kfree(epage);
+
+	for (i = 0; i < eccbytes; i++)
+		g_chip.paranoid_ecc_mask[i] ^= 0xff;
+
+	g_chip.paranoid_ecc_buf = kmalloc(g_chip.paranoid_ecc_bytes, GFP_KERNEL);
+	return (g_chip.bch ? 0 : -EINVAL);
+}
+
 static int mnand_core_reset(void)
 {
 
@@ -482,6 +605,9 @@ static int mnand_core_read(loff_t off)
 
                                 __nand_calculate_ecc(ecc_block, 256, soft_ecc,false); // v5.5.0: bool sm_order
                                 mnand_get_hardware_ecc(i, hard_ecc);
+
+				if(g_mnand_use_soft_paranoid_bch)
+					continue;
 
                                 if (memcmp(hard_ecc, soft_ecc, MNAND_ECC_BYTESPERBLOCK) != 0) {
                                         printk("\n\necc mismatch %02X %02X %02X - %02x %02X %02X \n\n",
@@ -920,6 +1046,9 @@ static int mnand_write_oob(struct mtd_info* mtd, loff_t to, struct mtd_oob_ops* 
                                 }
                         }
 
+                        if (g_mnand_use_soft_paranoid_bch) {
+                	        mnand_paranoid_calculate_ecc(mtd, g_chip.dma_area, mnand_get_spare_ecc_paranoid(mtd));
+                        }
                         err = mnand_core_write(to);
 
                         if(err)
@@ -947,15 +1076,10 @@ static int mnand_read_oob(struct mtd_info* mtd, loff_t from, struct mtd_oob_ops*
         uint8_t* data = ops->datbuf;
         uint8_t* oob = ops->oobbuf;
         int err;
+        int corrected;
 
         uint8_t* dataend = data + ops->len;
         uint8_t* oobend = oob ? oob + ops->ooblen : 0;
-
-        TRACE(KERN_DEBUG,
-              "from=0x%08llX, ops.mode=%d, ops.len=%d, ops.ooblen=%d ops.ooboffs=0x%08X data=%p\n",
-              from, ops->mode, ops->len, ops->ooblen, ops->ooboffs, data);
-
-        TRACE(KERN_DEBUG, "oob %p, oobend %p\n", oob, oobend);
 
         if(ops->len != 0 && data == 0) {
                 ops->len = 0;
@@ -978,10 +1102,21 @@ static int mnand_read_oob(struct mtd_info* mtd, loff_t from, struct mtd_oob_ops*
                         if(data != dataend) {
                                 size_t shift = (from & (mtd->writesize -1));
                                 size_t bytes = min_t(size_t,dataend-data, mtd->writesize-shift);
+                                int ret; 
 
                                 TRACE(KERN_DEBUG, "data %p dataend %p shift 0x%X bytes 0x%X\n",
                                       data, dataend, shift, bytes);
 
+                                if (g_mnand_use_soft_paranoid_bch) {
+			                ret = mnand_correct_paranoid(mtd, g_chip.dma_area,  mnand_get_spare_ecc_paranoid(mtd));
+			                if (ret > 0) {
+			                	g_chip.ecc_corrected += ret;
+			                	if (ret > g_chip.ecc_maxflips_per_read)
+			                		g_chip.ecc_maxflips_per_read = ret;
+			                }
+			                if (ret < 0)
+			                	g_chip.ecc_failed++;
+                                }
                                 memcpy(data, g_chip.dma_area + shift, bytes);
                                 data += bytes;
                         }
@@ -1008,10 +1143,13 @@ static int mnand_read_oob(struct mtd_info* mtd, loff_t from, struct mtd_oob_ops*
                                 g_chip.mtd.ecc_stats.failed = g_chip.ecc_failed;
                                 g_chip.mtd.ecc_stats.corrected = g_chip.ecc_corrected;
                                 err = -EBADMSG;
+                                
                         } else if(g_chip.mtd.ecc_stats.corrected != g_chip.ecc_corrected) {
+                                corrected = g_chip.ecc_corrected - g_chip.mtd.ecc_stats.corrected;
                                 g_chip.mtd.ecc_stats.failed = g_chip.ecc_failed;
                                 g_chip.mtd.ecc_stats.corrected = g_chip.ecc_corrected;
-                                err = -EUCLEAN;
+                                /* WORKAROUND as described: http://patchwork.ozlabs.org/project/linux-mtd/patch/1bcbe82a-85e5-52f8-dc54-9d22e5b390fa@digivation.com.au/ */
+                                err = (corrected >= mtd->bitflip_threshold) ? -EUCLEAN : 0;
                         }
                 }
 
@@ -1103,7 +1241,7 @@ static int of_mnand_probe(struct platform_device* ofdev)
 {
         const struct of_device_id *match;
         struct device_node *of_node = ofdev->dev.of_node;
-        const char *part_probes[] = { "ofpart"/*"cmdlinepart"*/, NULL, };
+        const char *part_probes[] = { "cmdlinepart", NULL, };
         struct mtd_info *mtd;
         int err;
 
@@ -1194,6 +1332,12 @@ static int of_mnand_probe(struct platform_device* ofdev)
         mtd->writesize_shift = ffs(mtd->writesize) - 1;
         mtd->erasesize_mask = (1 << mtd->erasesize_shift) - 1;
         mtd->writesize_mask = (1 << mtd->writesize_shift) - 1;
+
+        err = mnand_attach_paranoid_bch(mtd);
+        if (err < 0) {
+                printk(KERN_ERR "Failed to attach bch encoder (code: %d)\n", err);
+	}
+
         return 0;
 
 error_dma:

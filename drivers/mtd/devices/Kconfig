@@ -74,6 +74,7 @@ config MTD_MNAND
 	   select MTD_RAW_NAND
 	   select MTD_NAND_ECC_SW_HAMMING
        select MTD_NAND_IDS
+	   select BCH
 
 config MTD_DATAFLASH_OTP
 	bool "DataFlash OTP support (Security Register)"
