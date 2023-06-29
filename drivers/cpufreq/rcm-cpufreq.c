@@ -37,6 +37,7 @@
 #define CPUFREQ_UPD_CK_OFFSET 0x001c
 #define CPUFREQ_WRLOCK_OFFSET 0x00C
 #define CPUFREQ_WRUNLOCK 0x1ACCE551
+#define CPUFREQ_CKDIVMODE_PPC_TMR 0x120
 
 #define TRANSITION_LATENCY	(40 * 1000)	/* 40 us (~1000 clocks at refclk/prediv) */
 
@@ -46,6 +47,7 @@ struct rcm_freq_mode {
 	unsigned int prediv; // 1..31
 	unsigned int postdiv; // 2'b00 - 1; 2'b01 - 2; 2'b10 - 4; 2'b11 - 8
 	unsigned int cpudiv; // 0 - 255; Fclk = Fpll/(cpudiv+1)
+	unsigned int tmrdiv; // 0 - 255; Fclk = Fpll/(tmrdiv+1)
 };
 
 struct rcm_cpufreq_data {
@@ -62,9 +64,10 @@ static int rcm_switch_cpufreq(struct rcm_cpufreq_data *drv_data,
 	unsigned long flags;
 	unsigned int val;
 	int retval = 0;
-	unsigned int fbdiv, prediv, postdiv, cpudiv;
+	unsigned int fbdiv, prediv, postdiv, cpudiv, tmrdiv;
 	unsigned int pll_flag;
 	unsigned int ckdiv_flag;
+	unsigned int tmrdiv_flag;
 	unsigned int timeout;
 
 	// first check that we really need to change frequency
@@ -76,14 +79,26 @@ static int rcm_switch_cpufreq(struct rcm_cpufreq_data *drv_data,
 	regmap_read(drv_data->control, CPUFREQ_PRDIV_OFFSET, &prediv);
 	regmap_read(drv_data->control, CPUFREQ_PSDIV_OFFSET, &postdiv);
 	regmap_read(drv_data->control, CPUFREQ_CKDIVMODE_CPU_OFFSET, &cpudiv);
+	regmap_read(drv_data->control, CPUFREQ_CKDIVMODE_PPC_TMR, &tmrdiv);
+
+	pr_debug("%s. Current value: prediv=%u, fbdiv=%u, postdiv=%u, cpudiv=%u, tmrdiv=%u\n",
+	                   __func__, prediv, fbdiv, postdiv, cpudiv, tmrdiv);
+
+	pr_debug("%s. New value: prediv=%u, fbdiv=%u, postdiv=%u, cpudiv=%u, tmrdiv=%u\n",
+	                   __func__, drv_data->cpu_modes[index].prediv,
+					             drv_data->cpu_modes[index].fbdiv,
+								 drv_data->cpu_modes[index].postdiv,
+								 drv_data->cpu_modes[index].cpudiv,
+								 drv_data->cpu_modes[index].tmrdiv);
 
 	pll_flag = (drv_data->cpu_modes[index].fbdiv != fbdiv ||
 				drv_data->cpu_modes[index].prediv != prediv ||
 				drv_data->cpu_modes[index].postdiv != postdiv );
 
 	ckdiv_flag = (drv_data->cpu_modes[index].cpudiv != cpudiv);
+	tmrdiv_flag = (drv_data->cpu_modes[index].tmrdiv != tmrdiv);
 
-	if (pll_flag || ckdiv_flag) {
+	if (pll_flag || ckdiv_flag || tmrdiv_flag) {
 
 		local_irq_save(flags);
 
@@ -108,7 +123,14 @@ static int rcm_switch_cpufreq(struct rcm_cpufreq_data *drv_data,
 			if(ckdiv_flag) {
 				regmap_write(drv_data->control, CPUFREQ_CKDIVMODE_CPU_OFFSET,
 						drv_data->cpu_modes[index].cpudiv);
+			}
 
+			if(tmrdiv_flag) {
+				regmap_write(drv_data->control, CPUFREQ_CKDIVMODE_PPC_TMR,
+						drv_data->cpu_modes[index].tmrdiv);
+			}
+
+			if(ckdiv_flag || tmrdiv_flag) {
 				regmap_write(drv_data->control, CPUFREQ_UPD_CK_OFFSET, 1);
 			}
 

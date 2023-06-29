@@ -588,11 +588,16 @@
 
 			cpufreq: cpufreq@0x38006000 {
 				status = "ok";
-					// freq       fb pre post div
-					freqs = <100000     32  1   2    1>,
-							<200000     32  1   2    0>,
-							<400000     32  1   1    0>,
-							<800000     64  1   1    0>;
+				//       freq       fb pre post cpudiv tmrdiv
+				freqs = <266667     64  1   1    2      7>,
+				        <400000     64  1   1    1      7>,
+						<800000     64  1   1    0      7>;
+
+//				freqs = <100000     32  1   2    1      7>,
+//						<200000     32  1   1    1      7>,
+//						<400000     32  1   1    0      7>,
+//						<600000     48  1   1    0      7>,
+//						<800000     64  1   1    0      7>;
 
 				/* 50 us (>1000 clocks at refclk/prediv) */
 				transition-latency = <50000>; 
