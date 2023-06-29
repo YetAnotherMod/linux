@@ -60,11 +60,12 @@ static int rcm_switch_cpufreq(struct rcm_cpufreq_data *drv_data,
 				   unsigned int index)
 {
 	unsigned long flags;
-//	unsigned int val;
+	unsigned int val;
 	int retval = 0;
 	unsigned int fbdiv, prediv, postdiv, cpudiv;
 	unsigned int pll_flag;
 	unsigned int ckdiv_flag;
+	unsigned int timeout;
 
 	// first check that we really need to change frequency
 	if(regmap_read(drv_data->control, CPUFREQ_FBDIV_OFFSET, &fbdiv))
@@ -113,13 +114,24 @@ static int rcm_switch_cpufreq(struct rcm_cpufreq_data *drv_data,
 
 			// wait while PLL will be stabilized enough
 			// just estimated behavior - no manual for a while
-//			do {
-//				if (regmap_read(drv_data->control, CPUFREQ_PLLSTATE_OFFSET, &val)) {
-//					pr_err("Unable to access control regmap\n");
-//					retval = 2;
-//				}
-//			} while (!(val & 0x1));
-//
+
+			timeout = drv_data->transition_latency / 1000;
+			do {
+				if (regmap_read(drv_data->control, CPUFREQ_PLLSTATE_OFFSET, &val)) {
+					pr_err("Unable to access control regmap\n");
+					retval = 2;
+				}
+				timeout--;
+				udelay(1);
+			} while (timeout && !(val & 0x1));
+
+			if (!retval) {
+				if (timeout == 0) {
+					pr_err("PLL stabilization failed\n");
+					retval = 3;
+				}
+			}
+
 			regmap_write(drv_data->control, CPUFREQ_WRLOCK_OFFSET,
 				     0); // lock back
 
