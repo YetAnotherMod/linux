@@ -133,6 +133,8 @@ static inline u64 get_cpu_idle_time_jiffy(unsigned int cpu, u64 *wall)
 	if (wall)
 		*wall = div_u64(cur_wall_time, NSEC_PER_USEC);
 
+	pr_debug("----> %s: cpu = %d; idle_time = %llu\n", __func__, cpu, div_u64(idle_time, NSEC_PER_USEC));
+
 	return div_u64(idle_time, NSEC_PER_USEC);
 }
 
@@ -367,10 +369,16 @@ static void cpufreq_notify_transition(struct cpufreq_policy *policy,
 		srcu_notifier_call_chain(&cpufreq_transition_notifier_list,
 					 CPUFREQ_PRECHANGE, freqs);
 
+#ifdef CONFIG_CPU_FREQ_RCM_1888TX018_ADJUST_TIME_PARAMS
+		adjust_ppc_time_consts(CPUFREQ_PRECHANGE, freqs);
+#endif
 		adjust_jiffies(CPUFREQ_PRECHANGE, freqs);
 		break;
 
 	case CPUFREQ_POSTCHANGE:
+#ifdef CONFIG_CPU_FREQ_RCM_1888TX018_ADJUST_TIME_PARAMS
+		adjust_ppc_time_consts(CPUFREQ_POSTCHANGE, freqs);
+#endif
 		adjust_jiffies(CPUFREQ_POSTCHANGE, freqs);
 		pr_debug("FREQ: %u - CPUs: %*pbl\n", freqs->new,
 			 cpumask_pr_args(policy->cpus));
