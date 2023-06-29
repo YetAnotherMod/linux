@@ -184,7 +184,6 @@ static unsigned int rcm_get_cpu_freq(unsigned int cpu)
 
 static struct cpufreq_driver rcm_cpufreq_driver = {
 	.name = "rcm-cpufreq",
-	.flags = CPUFREQ_CONST_LOOPS,
 	.init = rcm_cpufreq_init,
 	.verify = cpufreq_generic_frequency_table_verify,
 	.target_index = rcm_cpufreq_target,
