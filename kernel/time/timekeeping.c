@@ -2403,19 +2403,79 @@ void xtime_update(unsigned long ticks)
 	update_wall_time();
 }
 
-#ifdef CONFIG_1888TX018
+#ifdef CONFIG_CPU_FREQ_RCM_1888TX018_ADJUST_TIME_PARAMS
+
+static void tk_update_internals(struct timekeeper *tk)
+{
+	u64 interval;
+	u64 tmp, ntpinterval;
+	struct clocksource *clock;
+	int shift_change;
+
+	++tk->cs_was_changed_seq;
+	clock = tk->tkr_mono.clock;
+
+	tk->tkr_mono.mask = clock->mask;
+	tk->tkr_mono.cycle_last = tk_clock_read(&tk->tkr_mono);
+
+	tk->tkr_raw.mask = clock->mask;
+	tk->tkr_raw.cycle_last = tk->tkr_mono.cycle_last;
+
+	/* Do the ns -> cycle conversion first, using original mult */
+	tmp = NTP_INTERVAL_LENGTH;
+	tmp <<= clock->shift;
+	ntpinterval = tmp;
+	tmp += clock->mult/2;
+	do_div(tmp, clock->mult);
+	if (tmp == 0)
+		tmp = 1;
+
+	interval = (u64) tmp;
+	tk->cycle_interval = interval;
+
+	/* Go back from cycles -> shifted ns */
+	tk->xtime_interval = interval * clock->mult;
+	tk->xtime_remainder = ntpinterval - tk->xtime_interval;
+	tk->raw_interval = interval * clock->mult;
+
+	 /* if changing clocks, convert xtime_nsec shift units */
+	shift_change = clock->shift - tk->tkr_mono.shift;
+	if (shift_change < 0) {
+		tk->tkr_mono.xtime_nsec >>= -shift_change;
+		tk->tkr_raw.xtime_nsec >>= -shift_change;
+	} else {
+		tk->tkr_mono.xtime_nsec <<= shift_change;
+		tk->tkr_raw.xtime_nsec <<= shift_change;
+	}
+
+	tk->tkr_mono.shift = clock->shift;
+	tk->tkr_raw.shift = clock->shift;
+
+	tk->ntp_error = 0;
+	tk->ntp_error_shift = NTP_SCALE_SHIFT - clock->shift;
+	tk->ntp_tick = ntpinterval << tk->ntp_error_shift;
+
+	/*
+	 * The timekeeper keeps its own mult values for the currently
+	 * active clocksource. These value will be adjusted via NTP
+	 * to counteract clock drifting.
+	 */
+	tk->tkr_mono.mult = clock->mult;
+	tk->tkr_raw.mult = clock->mult;
+	tk->ntp_err_mult = 0;
+	tk->skip_second_overflow = 0;
+}
+
 void timekeeping_recalc_internals(void)
 {
 	struct timekeeper *tk = &tk_core.timekeeper;
-	struct clocksource *clock;
 	unsigned long flags;
 
 	raw_spin_lock_irqsave(&timekeeper_lock, flags);
 	write_seqcount_begin(&tk_core.seq);
 
 	timekeeping_forward_now(tk);
-	clock = tk->tkr_mono.clock;
-	tk_setup_internals(tk, clock);
+	tk_update_internals(tk);
 	timekeeping_update(tk, TK_CLEAR_NTP | TK_MIRROR | TK_CLOCK_WAS_SET);
 
 	write_seqcount_end(&tk_core.seq);
@@ -2423,4 +2483,4 @@ void timekeeping_recalc_internals(void)
 
 	return;
 }
-#endif
+#endif //CONFIG_CPU_FREQ_RCM_1888TX018_ADJUST_TIME_PARAMS
