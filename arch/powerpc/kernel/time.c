@@ -1018,8 +1018,8 @@ static void register_decrementer_clockevent(int cpu)
 
 	clockevents_config_and_register(dec, ppc_tb_freq, 2, decrementer_max);
 
-	printk_once(KERN_DEBUG "clockevent: %s mult[%x] shift[%d] cpu[%d]\n",
-		    dec->name, dec->mult, dec->shift, cpu);
+	printk(KERN_DEBUG "clockevent: %s mult[%x] shift[%d] cpu[%d] ppc_tb_freq[%ld] decrementer_max[%lld]\n",
+		    dec->name, dec->mult, dec->shift, cpu, ppc_tb_freq, decrementer_max);
 
 	/* Set values for KVM, see kvm_emulate_dec() */
 	decrementer_clockevent.mult = dec->mult;
