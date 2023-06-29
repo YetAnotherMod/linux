@@ -92,7 +92,7 @@ static int rcm_switch_cpufreq(struct rcm_cpufreq_data *drv_data,
 		{
 			if(pll_flag) {
 				// Disable PLL
-				regmap_write_bits(drv_data->control,CPUFREQ_PLLCTRL_OFFSET, BIT(1), 0);
+				//regmap_write_bits(drv_data->control,CPUFREQ_PLLCTRL_OFFSET, BIT(1), 0);
 				// write new data to PLL control
 				regmap_write(drv_data->control, CPUFREQ_FBDIV_OFFSET,
 						drv_data->cpu_modes[index].fbdiv);
@@ -101,8 +101,8 @@ static int rcm_switch_cpufreq(struct rcm_cpufreq_data *drv_data,
 				regmap_write(drv_data->control, CPUFREQ_PSDIV_OFFSET,
 						drv_data->cpu_modes[index].postdiv);
 				// Enable PLL
-				regmap_write_bits(drv_data->control,CPUFREQ_PLLCTRL_OFFSET, BIT(1), BIT(1));
-				//regmap_update_bits(drv_data->control, CPUFREQ_PLLCTRL_OFFSET, BIT(0), 1); // restart PLL
+				//regmap_write_bits(drv_data->control,CPUFREQ_PLLCTRL_OFFSET, BIT(1), BIT(1));
+				regmap_update_bits(drv_data->control, CPUFREQ_PLLCTRL_OFFSET, BIT(0), 1); // restart PLL
 			}
 
 			if(ckdiv_flag) {
