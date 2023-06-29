@@ -141,6 +141,9 @@ static void od_update(struct cpufreq_policy *policy)
 
 	dbs_info->freq_lo = 0;
 
+	pr_debug("----> %s: load = %u; up_threshold = %u\n", __func__, load, dbs_data->up_threshold);
+	pr_debug("----> %s: policy->cur = %u; policy->max = %u\n", __func__, policy->cur, policy->max);
+
 	/* Check for frequency increase */
 	if (load > dbs_data->up_threshold) {
 		/* If switching to max speed, apply sampling_down_factor */
