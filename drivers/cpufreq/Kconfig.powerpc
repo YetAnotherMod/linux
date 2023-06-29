@@ -25,11 +25,14 @@ config CPU_FREQ_MAPLE
 	  Evaluation Board and compatible boards (IBM JS2x blades).
 
 config CPU_FREQ_RCM_1888TX018
-	bool "Support for RCM 1888TX018 Evaluation Board"
+	bool "Support for RCM 1888TX018 SoC"
 	depends on 1888TX018
 	help
-	  This adds support for frequency switching on 1888TX018
-	  Evaluation Board and compatible boards.
+	  This adds support for frequency switching on 1888TX018 SoC
+
+config CPU_FREQ_RCM_1888TX018_ADJUST_TIME_PARAMS
+	bool "Adjust time params"
+	depends on CPU_FREQ_RCM_1888TX018
 
 config CPU_FREQ_RCM_1888BM18
 	bool "Support for RCM 1888BM18 SoC"
