@@ -38,6 +38,8 @@
 #define CPUFREQ_WRLOCK_OFFSET 0x00C
 #define CPUFREQ_WRUNLOCK 0x1ACCE551
 
+#define TRANSITION_LATENCY	(40 * 1000)	/* 40 us (~1000 clocks at refclk/prediv) */
+
 struct rcm_freq_mode {
 	unsigned int freq_khz;
 	unsigned int fbdiv; // 8..511
@@ -51,6 +53,7 @@ struct rcm_cpufreq_data {
 	struct cpufreq_frequency_table *cpu_freqs;
 	struct rcm_freq_mode *cpu_modes;
 	int curr_mode;
+	unsigned int transition_latency;
 };
 
 static int rcm_switch_cpufreq(struct rcm_cpufreq_data *drv_data,
@@ -59,7 +62,7 @@ static int rcm_switch_cpufreq(struct rcm_cpufreq_data *drv_data,
 	unsigned long flags;
 //	unsigned int val;
 	int retval = 0;
-	unsigned int fbdiv, prdiv, postdiv, cpudiv;
+	unsigned int fbdiv, prediv, postdiv, cpudiv;
 	unsigned int pll_flag;
 	unsigned int ckdiv_flag;
 
@@ -69,12 +72,12 @@ static int rcm_switch_cpufreq(struct rcm_cpufreq_data *drv_data,
 		pr_err("Unable to access control regmap\n");
 		return 2;
 	}
-	regmap_read(drv_data->control, CPUFREQ_PRDIV_OFFSET, &prdiv);
+	regmap_read(drv_data->control, CPUFREQ_PRDIV_OFFSET, &prediv);
 	regmap_read(drv_data->control, CPUFREQ_PSDIV_OFFSET, &postdiv);
 	regmap_read(drv_data->control, CPUFREQ_CKDIVMODE_CPU_OFFSET, &cpudiv);
 
 	pll_flag = (drv_data->cpu_modes[index].fbdiv != fbdiv ||
-				drv_data->cpu_modes[index].prediv != prdiv ||
+				drv_data->cpu_modes[index].prediv != prediv ||
 				drv_data->cpu_modes[index].postdiv != postdiv );
 
 	ckdiv_flag = (drv_data->cpu_modes[index].cpudiv != cpudiv);
@@ -156,7 +159,7 @@ static int rcm_cpufreq_init(struct cpufreq_policy *policy)
 	struct rcm_cpufreq_data *data =
 		rcm_cpufreq_driver.driver_data;
 	cpufreq_generic_init(policy, data->cpu_freqs,
-					12000); // to check latency
+					data->transition_latency); // to check latency
 	return 0;
 }
 
@@ -205,6 +208,11 @@ static int rcm_cpufreq_probe(struct platform_device *pdev)
 		&pdev->dev,
 		(count + 1) * sizeof(struct cpufreq_frequency_table),
 		GFP_KERNEL);
+
+	if (of_property_read_u32(pdev->dev.of_node, "transition-latency", &data->transition_latency)) {
+		pr_warn("'transition-latency' not found in dtb. Set to default");
+		data->transition_latency = TRANSITION_LATENCY;
+	}
 
 	if (of_property_read_u32_array(pdev->dev.of_node, "freqs",
 				       (u32 *)data->cpu_modes,
@@ -260,8 +268,8 @@ static int rcm_cpufreq_probe(struct platform_device *pdev)
 		pr_warn("Requested CPU frequency not found set to lowest");
 	}
 	pr_info("Registering RC Module PPC 470s CPU frequency driver\n");
-	pr_info("Low: %d Mhz, High: %d Mhz, Cur: %d MHz\n", min / 1000,
-		max / 1000, data->cpu_freqs[index].frequency / 1000);
+	pr_info("Low: %d Mhz, High: %d Mhz, Cur: %d MHz, Transition latency: %d ns\n", min / 1000,
+		max / 1000, data->cpu_freqs[index].frequency / 1000, data->transition_latency);
 
 	rcm_switch_cpufreq(data, data->cpu_freqs[index].driver_data);
 	data->curr_mode = index;
