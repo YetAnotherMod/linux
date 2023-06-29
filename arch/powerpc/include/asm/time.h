@@ -16,6 +16,10 @@
 #include <asm/processor.h>
 #include <asm/cpu_has_feature.h>
 
+#ifdef CONFIG_CPU_FREQ_RCM_1888TX018_ADJUST_TIME_PARAMS
+#include <linux/cpufreq.h>
+#endif
+
 /* time.c */
 extern unsigned long tb_ticks_per_jiffy;
 extern unsigned long tb_ticks_per_usec;
@@ -25,6 +29,10 @@ extern struct clock_event_device decrementer_clockevent;
 
 extern void generic_calibrate_decr(void);
 extern void hdec_interrupt(struct pt_regs *regs);
+
+#ifdef CONFIG_CPU_FREQ_RCM_1888TX018_ADJUST_TIME_PARAMS
+extern void adjust_ppc_time_consts(unsigned long val, struct cpufreq_freqs *freqs);
+#endif
 
 /* Some sane defaults: 125 MHz timebase, 1GHz processor */
 extern unsigned long ppc_proc_freq;

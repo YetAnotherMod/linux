@@ -1205,6 +1205,73 @@ void calibrate_delay(void)
 	loops_per_jiffy = tb_ticks_per_jiffy;
 }
 
+
+#ifdef CONFIG_CPU_FREQ_RCM_1888TX018_ADJUST_TIME_PARAMS
+
+void adjust_ppc_time_consts(unsigned long val, struct cpufreq_freqs *freqs)
+{
+	struct div_result res;
+	u64 scale;
+	u64 new_tb_to_xs;
+	unsigned shift;
+	struct clocksource *clock;
+
+	struct clock_event_device *dec;
+
+	struct cpumask *cpus = freqs->policy->cpus;
+	int cpu;
+
+	if (freqs->flags & CPUFREQ_CONST_LOOPS)
+		return;
+
+	if (__USE_RTC())
+		return;
+	else
+		clock = &clocksource_timebase;
+
+
+	if (val == CPUFREQ_POSTCHANGE && freqs->old != freqs->new) {
+//	if ((val == CPUFREQ_PRECHANGE  && freqs->old < freqs->new) ||
+//	    (val == CPUFREQ_POSTCHANGE && freqs->old > freqs->new)) {
+
+		ppc_tb_freq = ppc_proc_freq;
+		tb_ticks_per_jiffy = ppc_tb_freq / HZ;
+		tb_ticks_per_sec = ppc_tb_freq;
+		tb_ticks_per_usec = ppc_tb_freq / 1000000;
+		calc_cputime_factors();
+
+		div128_by_32(1000000000, 0, tb_ticks_per_sec, &res);
+		scale = res.result_low;
+		for (shift = 0; res.result_high != 0; ++shift) {
+			scale = (scale >> 1) | (res.result_high << 63);
+			res.result_high >>= 1;
+		}
+		tb_to_ns_scale = scale;
+		tb_to_ns_shift = shift;
+
+		loops_per_jiffy = tb_ticks_per_jiffy;
+
+		__clocksource_update_freq_hz(clock, ppc_proc_freq);
+
+		for_each_cpu(cpu, cpus) {
+			dec = &per_cpu(decrementers, cpu);
+			clockevents_update_freq(dec, ppc_tb_freq);
+		}
+
+		if (clock->mult <= 62500000 && clock->shift >= 16)
+			new_tb_to_xs = ((u64) clock->mult * 295147905179ULL) >> (clock->shift - 16);
+		else
+			new_tb_to_xs = (u64) clock->mult * (19342813113834067ULL >> clock->shift);
+
+		vdso_data->tb_ticks_per_sec = tb_ticks_per_sec;
+		vdso_data->tb_to_xs = new_tb_to_xs;
+
+		timekeeping_recalc_internals();
+	}
+}
+#endif //CONFIG_CPU_FREQ_RCM_1888TX018_ADJUST_TIME_PARAMS
+
+
 #if IS_ENABLED(CONFIG_RTC_DRV_GENERIC)
 static int rtc_generic_get_time(struct device *dev, struct rtc_time *tm)
 {
