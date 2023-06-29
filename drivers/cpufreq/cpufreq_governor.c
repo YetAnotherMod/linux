@@ -10,7 +10,6 @@
  *		(C) 2009 Alexander Clouter <alex@digriz.org.uk>
  *		(c) 2012 Viresh Kumar <viresh.kumar@linaro.org>
  */
-
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/export.h>
@@ -155,6 +154,9 @@ unsigned int dbs_update(struct cpufreq_policy *policy)
 			j_cdbs->prev_cpu_nice = cur_nice;
 		}
 
+		pr_debug("----> %s: cpu = %d; idle_time = %d; time_elapsed = %u; cur_idle_time = %llu; update_time = %lld; sampling_rate = %u\n", 
+		                __func__, j, idle_time, time_elapsed, cur_idle_time, update_time, sampling_rate);
+
 		if (unlikely(!time_elapsed)) {
 			/*
 			 * That can only happen when this function is called
@@ -162,6 +164,7 @@ unsigned int dbs_update(struct cpufreq_policy *policy)
 			 * calls, so the previous load value can be used then.
 			 */
 			load = j_cdbs->prev_load;
+			pr_debug("----> %s: unlikely(!time_elapsed)\n",__func__);
 		} else if (unlikely((int)idle_time > 2 * sampling_rate &&
 				    j_cdbs->prev_load)) {
 			/*
@@ -188,6 +191,7 @@ unsigned int dbs_update(struct cpufreq_policy *policy)
 			 */
 			load = j_cdbs->prev_load;
 			j_cdbs->prev_load = 0;
+			pr_debug("----> %s: unlikely((int)idle_time > 2 * sampling_rate && j_cdbs->prev_load)\n",__func__);
 		} else {
 			if (time_elapsed >= idle_time) {
 				load = 100 * (time_elapsed - idle_time) / time_elapsed;
@@ -208,6 +212,7 @@ unsigned int dbs_update(struct cpufreq_policy *policy)
 				 * returned as the load.
 				 */
 				load = (int)idle_time < 0 ? 100 : 0;
+				pr_debug("----> %s: time_elapsed < idle_time\n",__func__);
 			}
 			j_cdbs->prev_load = load;
 		}
