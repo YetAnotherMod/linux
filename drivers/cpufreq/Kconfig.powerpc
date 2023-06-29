@@ -34,6 +34,10 @@ config CPU_FREQ_RCM_1888TX018_ADJUST_TIME_PARAMS
 	bool "Adjust time params"
 	depends on CPU_FREQ_RCM_1888TX018
 
+config CPU_FREQ_RCM_1888TX018_TIMEBASE_USE_ALT_CLOCK
+	bool "Use alt clock for timebase"
+	depends on CPU_FREQ_RCM_1888TX018
+
 config CPU_FREQ_RCM_1888BM18
 	bool "Support for RCM 1888BM18 SoC"
 	depends on 1888BM18

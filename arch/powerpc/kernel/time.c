@@ -1096,6 +1096,10 @@ void __init time_init(void)
 	u64 scale;
 	unsigned shift;
 
+#ifdef CONFIG_CPU_FREQ_RCM_1888TX018_TIMEBASE_USE_ALT_CLOCK
+	u32 ccr1;
+#endif
+
 	if (__USE_RTC()) {
 		/* 601 processor: dec counts down by 128 every 128ns */
 		ppc_tb_freq = 1000000000;
@@ -1107,6 +1111,23 @@ void __init time_init(void)
 		printk(KERN_DEBUG "time_init: processor frequency   = %lu.%.6lu MHz\n",
 		       ppc_proc_freq / 1000000, ppc_proc_freq % 1000000);
 	}
+
+#ifdef CONFIG_CPU_FREQ_RCM_1888TX018_TIMEBASE_USE_ALT_CLOCK
+
+#define SPRN_CCR1 0x378
+#define IBM_BIT_INDEX( size, index )    ( ((size)-1) - ((index)%(size)) )
+#define CTRL_CCR1_TSS_e 			19
+#define CTRL_CCR1_TSS_i      		IBM_BIT_INDEX( 32, CTRL_CCR1_TSS_e )
+#define CTRL_CCR1_TSS_CPU_clock		0b0
+#define CTRL_CCR1_TSS_alt_clock 	0b1
+
+	/* Figure out timebase.  Either CPU or default TmrClk */
+	ccr1 = mfspr(SPRN_CCR1);
+	ccr1 |= (CTRL_CCR1_TSS_alt_clock << CTRL_CCR1_TSS_i);
+	mtspr(SPRN_CCR1, ccr1);
+	printk(KERN_DEBUG "time_init: Force Alt clock for timebase\n");
+
+#endif
 
 	tb_ticks_per_jiffy = ppc_tb_freq / HZ;
 	tb_ticks_per_sec = ppc_tb_freq;
