@@ -593,6 +593,9 @@
 							<200000     32  1   2    0>,
 							<400000     32  1   1    0>,
 							<800000     64  1   1    0>;
+
+				/* 50 us (>1000 clocks at refclk/prediv) */
+				transition-latency = <50000>; 
 			};
 
 		};
