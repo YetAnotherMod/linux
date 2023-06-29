@@ -138,7 +138,7 @@ struct timekeeper {
 #endif
 };
 
-#ifdef CONFIG_1888TX018
+#ifdef CONFIG_CPU_FREQ_RCM_1888TX018_ADJUST_TIME_PARAMS
 void timekeeping_recalc_internals(void);
 #endif
 
