@@ -91,7 +91,7 @@
 			regulator-always-on;
 			startup-delay-us = <1000000>;
 			vin-supply = <&vsys_5v>;
-			gpio = <&gpio1 3 0>;
+			gpio = <&gpio1 4 0>;
 		};
 
 		vbus_usb2: vbus_usb2@2 {
@@ -106,7 +106,7 @@
 			regulator-always-on;
 			startup-delay-us = <2000000>;
 			vin-supply = <&vsys_5v>;
-			gpio = <&gpio1 4 0>;
+			gpio = <&gpio1 0 0>;
 		};
 	};
 
@@ -149,6 +149,10 @@
 				status = "disabled";
 			};
 
+			lsif0_mgpio6: lsif0_mgpio6@0x3C046420 {
+				status = "disabled";
+			};
+
 			gpio_mgpio0: gpio_mgpio0@0x3C040000 {
 				status = "ok";
 				#gpio-cells = <2>;
@@ -167,7 +171,7 @@
 				gpio-line-names = "      [mgpio0-0]", "      [mgpio0-1]",
 								  "      [mgpio0-2]", "      [mgpio0-3]",
 								  "      [mgpio0-4]", "      [mgpio0-5]",
-								  "pin37 [mgpio0-6]", "      [mgpio0-7]";
+								  "pin15 [mgpio0-6]", "      [mgpio0-7]";
 
 			};
 
@@ -186,10 +190,10 @@
 
 				gpioafsel = <0>; //set all GPIO to GPIO mode
 
-				gpio-line-names = "      [mgpio1-0]", "pin26 [mgpio1-1]",
-								  "pin36 [mgpio1-2]", "pin33 [mgpio1-3]",
+				gpio-line-names = "      [mgpio1-0]", "pin11 [mgpio1-1]",
+								  "pin16 [mgpio1-2]", "pin12 [mgpio1-3]",
 								  "      [mgpio1-4]", "      [mgpio1-5]",
-								  "pin24 [mgpio1-6]", "pin32 [mgpio1-7]";
+								  "pin13 [mgpio1-6]", "pin07 [mgpio1-7]";
 			};
 
 			gpio_mgpio2: gpio_mgpio2@0x3C042000 {
@@ -207,10 +211,10 @@
 
 				gpioafsel = <0>; //set all GPIO to GPIO mode
 
-				gpio-line-names = "pin22 [mgpio2-0]", "pin29 [mgpio2-1]",
-								  "pin31 [mgpio2-2]", "pin15 [mgpio2-3]",
-								  "pin16 [mgpio2-4]", "pin13 [mgpio2-5]",
-								  "pin11 [mgpio2-6]", "      [mgpio2-7]";
+				gpio-line-names = "pin26 [mgpio2-0]", "pin18 [mgpio2-1]",
+								  "pin22 [mgpio2-2]", "pin31 [mgpio2-3]",
+								  "pin29 [mgpio2-4]", "pin32 [mgpio2-5]",
+								  "pin37 [mgpio2-6]", "      [mgpio2-7]";
 			};
 
 			gpio_mgpio3: gpio_mgpio3@0x3C043000 {
@@ -228,10 +232,31 @@
 
 				gpioafsel = <0>; //set all GPIO to GPIO mode
 
-				gpio-line-names = "pin18 [mgpio3-0]", "      [mgpio3-1]",
-								  "pin07 [mgpio3-2]", "pin12 [mgpio3-3]",
+				gpio-line-names = "pin24 [mgpio3-0]", "      [mgpio3-1]",
+								  "pin36 [mgpio3-2]", "pin33 [mgpio3-3]",
 								  "      [mgpio3-4]", "      [mgpio3-5]",
 								  "      [mgpio3-6]", "      [mgpio3-7]";
+			};
+
+			gpio_mgpio6: gpio_mgpio6@0x3C046000 {
+				status = "ok";
+				#gpio-cells = <2>;
+				compatible = "arm,pl061", "arm,primecell";
+				gpio-controller;
+				reg = <0x3C046000 0x1000>;
+				interrupt-controller;
+				#interrupt-cells = <2>;
+				interrupt-parent = <&MPIC>;
+				interrupts = <113 0>;
+				clocks = <&pclk>;
+				clock-names = "apb_pclk";
+
+				gpioafsel = <0>; //set all GPIO to GPIO mode
+
+				gpio-line-names = "        [mgpio6-0]", "        [mgpio6-1]",
+								  "VIN1_RST[mgpio6-2]", "        [mgpio6-3]",
+								  "        [mgpio6-4]", "        [mgpio6-5]",
+								  "        [mgpio6-6]", "        [mgpio6-7]";
 			};
 
 		};
@@ -283,6 +308,8 @@
 					clock-names = "xvclk";
 					assigned-clocks = <&xvclk>;
 					assigned-clock-rates = <24000000>;
+
+					resetb-gpios = <&gpio_mgpio6 2 0>;
 
 					port {
 						ov2640_0: endpoint {
@@ -406,8 +433,10 @@
 
 			gpio1: gpio1@0x3C066000 {
 				status = "ok";
-				gpio-line-names = "SYS_BOOT8", "CARD_DETECT", "HDMI_PD", "USB_VBUS_EN1",
-								  "USB_VBUS_EN2", "USB_VBUS_EN0", "PCIE_M2_RSTn0", "PCIE_M2_RSTn1";
+//				gpio-line-names = "SYS_BOOT8", "CARD_DETECT", "HDMI_PD", "USB_VBUS_EN1",
+//								  "USB_VBUS_EN2", "USB_VBUS_EN0", "PCIE_M2_RSTn0", "PCIE_M2_RSTn1";
+				gpio-line-names = "USB_VBUS_EN2", "CARD_DETECT", "HDMI_PD", "HDMI_INT",
+								  "USB_VBUS_EN1", "USB_VBUS_EN0", "PCIE_M2_RSTn0", "PCIE_M2_RSTn1";
 			};
 
 			usb_otg_hs: usb_otg_hs@0x3C06D000 {
