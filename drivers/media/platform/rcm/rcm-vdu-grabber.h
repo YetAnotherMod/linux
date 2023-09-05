@@ -256,7 +256,6 @@ struct grb_info {
 	spinlock_t irq_lock;
 	struct v4l2_device v4l2_dev;
 	struct media_device media_dev;
-	struct v4l2_pix_format user_format;
 	struct v4l2_rect cropping;
 	struct v4l2_pix_format recognize_format;
 	struct v4l2_format format;

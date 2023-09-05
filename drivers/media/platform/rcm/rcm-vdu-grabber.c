@@ -317,10 +317,11 @@ static int set_input_format( struct grb_info *grb_info_ptr ) {
 }
 
 static int set_output_format( struct grb_info *grb_info_ptr, struct v4l2_format *v4l2_format_ptr ) {
-	grb_info_ptr->user_format = v4l2_format_ptr->fmt.pix;
 // 0:   0-YCBCR, 1-RGB
 // 2,1: 01–ARGB8888, 10–YCbCr422, 11-YCbCr444,YCbCr422 too?,RGB888
 // 3:   0–YCbCr422, 1–YCbCr444
+
+	grb_info_ptr->format.fmt.pix = v4l2_format_ptr->fmt.pix;
 
 	grb_info_ptr->out_f.y_hor_size = v4l2_format_ptr->fmt.pix.width;
 	grb_info_ptr->out_f.y_ver_size = v4l2_format_ptr->fmt.pix.height;
@@ -623,7 +624,7 @@ int setup_registers( struct grb_info *grb_info_ptr ) {
 static int buf_setup_grb ( struct videobuf_queue *q, unsigned int *count, unsigned int *size ) {
 	struct grb_info *grb_info_ptr = q->priv_data;
 	int max_buff;
-	*size = grb_info_ptr->user_format.sizeimage;
+	*size = grb_info_ptr->format.fmt.pix.sizeimage;
 	GRB_DBG_PRINT( "buf setup entry: buff_length=%u,size=%u,count=%u\n", grb_info_ptr->buff_length, *size, *count )
 	if( *size == 0 )
 		return -EINVAL;
@@ -642,10 +643,10 @@ static int buf_setup_grb ( struct videobuf_queue *q, unsigned int *count, unsign
 
 static int buf_prepare_grb ( struct videobuf_queue *q, struct videobuf_buffer *vb, enum v4l2_field field ) {
 	struct grb_info *grb_info_ptr = q->priv_data;
-	GRB_DBG_PRINT_PROC_CALL;
-	vb->size = grb_info_ptr->user_format.sizeimage;
-	vb->width = grb_info_ptr->user_format.bytesperline;
-	vb->height = grb_info_ptr->user_format.height;
+	GRB_DBG_PRINT_PROC_CALL
+	vb->size = grb_info_ptr->format.fmt.pix.sizeimage;
+	vb->width = grb_info_ptr->format.fmt.pix.bytesperline;
+	vb->height = grb_info_ptr->format.fmt.pix.height;
 	vb->field = field;
 
 	if( vb->state == VIDEOBUF_NEEDS_INIT ) {
@@ -831,31 +832,29 @@ static int vidioc_s_crop_grb ( struct file *file_ptr,void *fh, const struct v4l2
 
 static int vidioc_fmt( struct grb_info *grb_info_ptr, struct v4l2_format *f ) {
 	if( f->type == V4L2_BUF_TYPE_VIDEO_CAPTURE ) {
-		f->fmt.pix.width = grb_info_ptr->recognize_format.width;
-		f->fmt.pix.height = grb_info_ptr->user_format.height = grb_info_ptr->recognize_format.height;
-		f->fmt.pix.field = grb_info_ptr->recognize_format.field;
-
-		print_four_cc( "vidioc_fmt entry: ", f->fmt.pix.pixelformat );
-
+		//f->fmt.pix.width  = grb_info_ptr->recognize_format.width;
+		//f->fmt.pix.height = grb_info_ptr->recognize_format.height;
+		//f->fmt.pix.field  = grb_info_ptr->recognize_format.field;
+		//print_four_cc( "vidioc_fmt entry: ", f->fmt.pix.pixelformat );
 		switch( f->fmt.pix.pixelformat  ) {
 		default:
-			f->fmt.pix.pixelformat = V4L2_PIX_FMT_NV16;
-			f->fmt.pix.bytesperline = grb_info_ptr->user_format.bytesperline = f->fmt.pix.width;
-			f->fmt.pix.sizeimage = grb_info_ptr->user_format.sizeimage = f->fmt.pix.bytesperline*f->fmt.pix.height*3;
+			f->fmt.pix.pixelformat  = V4L2_PIX_FMT_YUV422P;
+			f->fmt.pix.bytesperline = f->fmt.pix.width;
+			f->fmt.pix.sizeimage    = f->fmt.pix.bytesperline*f->fmt.pix.height*2;
 			break;
 		case V4L2_PIX_FMT_BGR32:
-			f->fmt.pix.bytesperline = grb_info_ptr->user_format.bytesperline = f->fmt.pix.width*4;
-			f->fmt.pix.sizeimage = grb_info_ptr->user_format.sizeimage = f->fmt.pix.bytesperline*f->fmt.pix.height;
+			f->fmt.pix.bytesperline = f->fmt.pix.width*4;
+			f->fmt.pix.sizeimage    = f->fmt.pix.bytesperline*f->fmt.pix.height;
 			break;
 		case V4L2_PIX_FMT_RGB24:
 		case V4L2_PIX_FMT_YUV444M:
-			f->fmt.pix.bytesperline = grb_info_ptr->user_format.bytesperline = f->fmt.pix.width;
-			f->fmt.pix.sizeimage = grb_info_ptr->user_format.sizeimage = f->fmt.pix.bytesperline*f->fmt.pix.height*3;
+			f->fmt.pix.bytesperline = f->fmt.pix.width;
+			f->fmt.pix.sizeimage    = f->fmt.pix.bytesperline*f->fmt.pix.height*3;
 			break;
 		case V4L2_PIX_FMT_NV16:
 		case V4L2_PIX_FMT_YUV422P:
-			f->fmt.pix.bytesperline = grb_info_ptr->user_format.bytesperline = f->fmt.pix.width;
-			f->fmt.pix.sizeimage = grb_info_ptr->user_format.sizeimage = f->fmt.pix.bytesperline*f->fmt.pix.height*2;
+			f->fmt.pix.bytesperline = f->fmt.pix.width;
+			f->fmt.pix.sizeimage    = f->fmt.pix.bytesperline*f->fmt.pix.height*2;
 			break;
 		}
 		f->fmt.pix.colorspace = V4L2_COLORSPACE_DEFAULT;
@@ -864,9 +863,7 @@ static int vidioc_fmt( struct grb_info *grb_info_ptr, struct v4l2_format *f ) {
 		f->fmt.pix.ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
 		f->fmt.pix.quantization = V4L2_QUANTIZATION_DEFAULT;
 		f->fmt.pix.xfer_func = 0;
-
-		print_four_cc( "vidioc_fmt return: ", f->fmt.pix.pixelformat );
-
+		//print_four_cc( "vidioc_fmt return: ", f->fmt.pix.pixelformat );
 		return 0;
 	}
 	else
@@ -889,7 +886,7 @@ static int vidioc_enum_fmt_vid_cap_grb( struct file *file, void *fh, struct v4l2
 		strlcpy( fmt->description, "YUV 4:2:2", sizeof(fmt->description) );
 		fmt->pixelformat = v4l2_fourcc( '4','2','2', 'P' );
 		break;
-#if 0 /* only two formats are support gstreamer */
+#if 1 /* only two formats are support gstreamer */
 	case 2: // V4L2_PIX_FMT_NV16,format with ½ horizontal chroma resolution, also known as YUV 4:2:2. One luminance and one chrominance plane.
 		fmt->flags = 0;
 		strlcpy( fmt->description, "YUV 4:2:2", sizeof(fmt->description) );
@@ -904,14 +901,79 @@ static int vidioc_enum_fmt_vid_cap_grb( struct file *file, void *fh, struct v4l2
 	default:
 		return -EINVAL;
 	}
-	GRB_DBG_PRINT( "vidioc_enum_fmt_vid_cap_grb: type=%08x,index=%08x,pixfmt=%08x\n", fmt->type, fmt->index, fmt->pixelformat );
+	GRB_DBG_PRINT( "vidioc_enum_fmt_vid_cap_grb: type=0x%08x,index=0x%08x,pixfmt=0x%08x\n", fmt->type, fmt->index, fmt->pixelformat );
+	return 0;
+}
+
+static int grb_try_fmt(struct grb_info *grb_info_ptr, struct v4l2_format *f, u32 *code)
+{
+	const struct grb_pix_map *vpix;
+	struct v4l2_pix_format *pixfmt = &f->fmt.pix;
+//	struct v4l2_subdev_format sd_fmt;
+
+	if (f->type != V4L2_BUF_TYPE_VIDEO_CAPTURE) {
+		GRB_DBG_PRINT( "Incorrect format type!\n" )
+		return -EINVAL;
+	}
+
+	/* Don't accept a pixelformat that is not on the table */
+	vpix = grb_pix_map_by_pixelformat(pixfmt->pixelformat);
+	if (!vpix) {
+		pixfmt->pixelformat = fmt_default.pixelformat;
+	}
+
+	if (pixfmt->field == V4L2_FIELD_ANY)
+		pixfmt->field = fmt_default.field;
+
+	/* Limit to hardware capabilities */
+	if (pixfmt->width > RCM_GRB_MAX_SUPPORT_WIDTH)
+		pixfmt->width = RCM_GRB_MAX_SUPPORT_WIDTH;
+	if (pixfmt->height > RCM_GRB_MAX_SUPPORT_HEIGHT)
+		pixfmt->height = RCM_GRB_MAX_SUPPORT_HEIGHT;
+	
+	if (pixfmt->width < RCM_GRB_MIN_SUPPORT_WIDTH)
+		pixfmt->width = fmt_default.width;
+	if (pixfmt->height < RCM_GRB_MIN_SUPPORT_HEIGHT)
+		pixfmt->height = fmt_default.height;
+
+//	sd_fmt.pad = grb_info_ptr->src_pad;
+//	sd_fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
+//	v4l2_subdev_call(grb_info_ptr->src_subdev, pad, get_fmt, NULL, &sd_fmt);
+//	v4l2_fill_pix_format(pixfmt, &sd_fmt.format);
+
+	switch( pixfmt->pixelformat  ) {
+	default:
+		pixfmt->pixelformat  = V4L2_PIX_FMT_YUV422P;
+		pixfmt->bytesperline = pixfmt->width;
+		pixfmt->sizeimage    = pixfmt->bytesperline*pixfmt->height*2;
+		GRB_DBG_PRINT( "Unsupported pixelformat format. Set to default.\n" )
+		break;
+	case V4L2_PIX_FMT_BGR32:
+		pixfmt->bytesperline = pixfmt->width*4;
+		pixfmt->sizeimage    = pixfmt->bytesperline*pixfmt->height;
+		break;
+	case V4L2_PIX_FMT_RGB24:
+	case V4L2_PIX_FMT_YUV444M:
+		pixfmt->bytesperline = pixfmt->width;
+		pixfmt->sizeimage    = pixfmt->bytesperline*pixfmt->height*3;
+		break;
+	case V4L2_PIX_FMT_NV16:
+	case V4L2_PIX_FMT_YUV422P:
+		pixfmt->bytesperline = pixfmt->width;
+		pixfmt->sizeimage    = pixfmt->bytesperline*pixfmt->height*2;
+		break;
+	}
+
+	pixfmt->field = V4L2_FIELD_NONE;
+
 	return 0;
 }
 
 static int vidioc_g_fmt_vid_cap_grb ( struct file *file_ptr, void *fh, struct v4l2_format *f ) {
-	int ret;
+	int ret = 0;
 	struct grb_info *grb_info_ptr = video_drvdata(file_ptr);
 	ret = vidioc_fmt( grb_info_ptr, f );
+	*f = grb_info_ptr->format;
 	print_v4l2_format( "Vidioc_g_fmt_vid_cap_grb return", (int)grb_info_ptr->phys_addr_regs_grb, f );
 	return ret;
 }
@@ -919,7 +981,8 @@ static int vidioc_g_fmt_vid_cap_grb ( struct file *file_ptr, void *fh, struct v4
 static int vidioc_try_fmt_vid_cap_grb( struct file *file_ptr, void *fh, struct v4l2_format *f ) {
 	int ret;
 	struct grb_info *grb_info_ptr = video_drvdata( file_ptr );
-	ret = vidioc_fmt( grb_info_ptr, f ) || set_output_format( grb_info_ptr, f );
+//	ret = vidioc_fmt( grb_info_ptr, f ) || set_output_format( grb_info_ptr, f );
+	ret = grb_try_fmt(grb_info_ptr, f, NULL);
 	print_v4l2_format( "Vidioc_try_fmt_vid_cap_grb return", (int)grb_info_ptr->phys_addr_regs_grb, f );
 	return ret;
 }
@@ -927,7 +990,14 @@ static int vidioc_try_fmt_vid_cap_grb( struct file *file_ptr, void *fh, struct v
 static int vidioc_s_fmt_vid_cap_grb ( struct file *file_ptr, void *fh, struct v4l2_format *f ) {
 	int ret;
 	struct grb_info *grb_info_ptr = video_drvdata( file_ptr );
-	ret = vidioc_fmt( grb_info_ptr, f ) || set_output_format( grb_info_ptr, f );	//negotiate the format of data (typically image format) exchanged between driver and application
+
+	ret = grb_try_fmt(grb_info_ptr, f, NULL);
+	if(ret)
+		return ret;
+
+	grb_info_ptr->format = *f;
+
+	ret = set_output_format( grb_info_ptr, f );	//negotiate the format of data (typically image format) exchanged between driver and application
 	print_v4l2_format( "Vidioc_s_fmt_vid_cap_grb return", (int)grb_info_ptr->phys_addr_regs_grb, f );
 	return ret;
 }
@@ -975,7 +1045,7 @@ static int vidioc_streamon_grb( struct file *file_ptr, void *fh, enum v4l2_buf_t
 	int retval;
 	void __iomem* base_addr = grb_info_ptr->base_addr_regs_grb;
 
-	GRB_DBG_PRINT_PROC_CALL;
+	GRB_DBG_PRINT_PROC_CALL
 	if( type != V4L2_BUF_TYPE_VIDEO_CAPTURE )
 		return -EINVAL;
 
@@ -1003,8 +1073,7 @@ static int vidioc_streamon_grb( struct file *file_ptr, void *fh, enum v4l2_buf_t
 	}
 
 	dump_all_regs("Dump regs after vidioc_streamon_grb", base_addr);
-
-	return 0;
+	return retval;
 
 err_start_stream:
 	v4l2_subdev_call(grb_info_ptr->entity.subdev, video, s_stream, 0);
@@ -1058,36 +1127,20 @@ static int drv_vidioc_s_params( struct grb_info *grb_info_ptr, void *arg ) { // 
 static int drv_vidioc_auto_detect( struct grb_info *grb_info_ptr, void *arg )
 { // todo mutex
 	struct v4l2_pix_format* recognize_format = (struct v4l2_pix_format*)arg;
-	void __iomem* base_addr = grb_info_ptr->base_addr_regs_grb;
+	int retval;
 
 	GRB_DBG_PRINT_PROC_CALL
 
-	if( reset_grab( grb_info_ptr->base_addr_regs_grb ) ) {
-		GRB_DBG_PRINT( "1. reset failed\n" )
-		return -EIO;
+	/* Enable stream on the sub device */
+	retval = v4l2_subdev_call(grb_info_ptr->entity.subdev, video, s_stream, 1);
+	if (retval && retval != -ENOIOCTLCMD) {
+		GRB_DBG_PRINT( "stream on failed in subdev\n" );
+		return retval;
 	}
 
-	init_completion( &grb_info_ptr->cmpl );
-	set_register( INT_BIT_DONE, grb_info_ptr->base_addr_regs_grb, ADDR_INT_STATUS );
-	set_register( INT_BIT_DONE, grb_info_ptr->base_addr_regs_grb, ADDR_INT_MASK );
-	write_register( 1 , grb_info_ptr->base_addr_regs_grb, ADDR_REC_ENABLE );
-	//print_registers( grb_info_ptr->base_addr_regs_grb, 0x100, 0x108 );
-
-	GRB_DBG_PRINT( "1.autodetection\n" )
-
-	if( wait_for_completion_timeout( &grb_info_ptr->cmpl, (HZ/2) ) == 0 ) {
-		GRB_DBG_PRINT( "1. Vidioc autodetection: timeout\n" )
-
-		dump_all_regs("1. Dump regs after drv_vidioc_auto_detect timeout", base_addr);
-
-//		return -ETIMEDOUT;
-	}
-
-	print_v4l2_pix_format(&grb_info_ptr->recognize_format);
-	GRB_DBG_PRINT( "2.autodetection\n" )
 
 	if( reset_grab( grb_info_ptr->base_addr_regs_grb ) ) {
-		GRB_DBG_PRINT( "1. reset failed\n" )
+		GRB_DBG_PRINT( "reset failed\n" )
 		return -EIO;
 	}
 
@@ -1098,10 +1151,8 @@ static int drv_vidioc_auto_detect( struct grb_info *grb_info_ptr, void *arg )
 	//print_registers( grb_info_ptr->base_addr_regs_grb, 0x100, 0x108 );
 
 	if( wait_for_completion_timeout( &grb_info_ptr->cmpl, (HZ/2) ) == 0 ) {
-		GRB_DBG_PRINT( "2. Vidioc autodetection: timeout\n" )
-
-		dump_all_regs("2. Dump regs after drv_vidioc_auto_detect timeout", base_addr);
-
+		GRB_DBG_PRINT( "Vidioc autodetection: timeout\n" )
+		v4l2_subdev_call(grb_info_ptr->entity.subdev, video, s_stream, 0);
 		return -ETIMEDOUT;
 	}
 
@@ -1110,10 +1161,11 @@ static int drv_vidioc_auto_detect( struct grb_info *grb_info_ptr, void *arg )
 
 	print_v4l2_pix_format(&grb_info_ptr->recognize_format);
 
-	dump_all_regs("Dump regs after drv_vidioc_auto_detect", base_addr);
-
 	if( recognize_format )
 		*recognize_format = grb_info_ptr->recognize_format;
+
+	v4l2_subdev_call(grb_info_ptr->entity.subdev, video, s_stream, 0);
+
 	return 0;
 }
 
@@ -1147,8 +1199,7 @@ static int vidioc_g_selection_grb( struct file *file, void *fh, struct v4l2_sele
 	struct grb_info *grb_info_ptr = video_drvdata(file);
 
 	if (s->type != V4L2_BUF_TYPE_VIDEO_CAPTURE) {
-		ret = -EINVAL;
-		goto exit;
+		s->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 	}
 
 	if( s->target == V4L2_SEL_TGT_CROP ) {				// 0: Crop rectangle. Defines the cropped area.
@@ -1157,25 +1208,25 @@ static int vidioc_g_selection_grb( struct file *file, void *fh, struct v4l2_sele
 	else if( s->target == V4L2_SEL_TGT_CROP_BOUNDS ) {	// 2: Bounds of the crop rectangle.
 		s->r.left = 0;									// All valid crop rectangles fit inside the crop bounds rectangle.
 		s->r.top = 0;
-		s->r.width = grb_info_ptr->recognize_format.width;
-		s->r.height = grb_info_ptr->recognize_format.height;
+		s->r.width = grb_info_ptr->format.fmt.pix.width;
+		s->r.height = grb_info_ptr->format.fmt.pix.height;
 	}
 	else if( s->target == V4L2_SEL_TGT_CROP_DEFAULT ) {	// 1:Suggested cropping rectangle that covers the “whole picture”.
 		s->r.left = 0;									// This includes only active pixels and excludes other non-active pixels such as black pixels.
 		s->r.top = 0;
-		s->r.width = grb_info_ptr->recognize_format.width;
-		s->r.height = grb_info_ptr->recognize_format.height;
+		s->r.width = grb_info_ptr->format.fmt.pix.width;
+		s->r.height = grb_info_ptr->format.fmt.pix.height;
 	}
 	else
 		ret = -EINVAL;
-exit:
+//exit:
 	if( !ret ) memset( s->reserved, 0, sizeof(s->reserved) );
 	return ret;
 }
 
 static int vidioc_s_selection_grb( struct file *file, void *fh, struct v4l2_selection *s ) {
 	struct grb_info *grb_info_ptr = video_drvdata(file);
-	GRB_DBG_PRINT_PROC_CALL;
+	GRB_DBG_PRINT_PROC_CALL
 	if (s->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
 		return -EINVAL;
 	grb_info_ptr->cropping = s->r; // rect
@@ -1754,7 +1805,7 @@ static int device_probe( struct platform_device *grb_device ) {
 	//grb_info_ptr->video_dev.vfl_dir	= VFL_DIR_M2M;
 	//grb_info_ptr->video_dev.tvnorms = V4L2_STD_ATSC_8_VSB + V4L2_STD_ATSC_16_VSB;
 
-//	grb_info_ptr->in_f.format_din = 0x04;			// it'default value
+//	grb_info_ptr->in_f.format_din = xx;			// it'default value
 	grb_info_ptr->param.sync = SYNC_EXTERNAL;
 	grb_info_ptr->param.std_in = STD_CLR_HD;
 	grb_info_ptr->param.v_if = V_IF_SERIAL;
@@ -1767,6 +1818,10 @@ static int device_probe( struct platform_device *grb_device ) {
 	grb_info_ptr->recognize_format.height = 480;
 	grb_info_ptr->recognize_format.field = V4L2_FIELD_NONE;
 
+	grb_info_ptr->cropping.left = 0;
+	grb_info_ptr->cropping.top = 0;
+	grb_info_ptr->cropping.width = 1;
+	grb_info_ptr->cropping.height = 1;
 
 	grb_info_ptr->media_dev.dev = grb_info_ptr->dev;
 	strscpy(grb_info_ptr->media_dev.model, "RCM Video Capture Device",
