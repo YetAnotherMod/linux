@@ -57,6 +57,60 @@ struct videobuf_dma_contig_memory {
 	unsigned long size;
 };
 
+static const struct v4l2_pix_format fmt_default = {
+	.width 			= XGA_WIDTH,
+	.height 		= XGA_HEIGHT,
+	.pixelformat 	= V4L2_PIX_FMT_YUV422P,
+	.field 			= V4L2_FIELD_NONE,
+	.colorspace 	= V4L2_COLORSPACE_DEFAULT,
+	.bytesperline   = XGA_WIDTH,
+	.sizeimage		= XGA_WIDTH * XGA_HEIGHT * 2,
+	.ycbcr_enc		= V4L2_YCBCR_ENC_DEFAULT,
+	.quantization	= V4L2_QUANTIZATION_DEFAULT,
+	.priv			= 0,
+	.flags			= 0,
+	.xfer_func		= V4L2_XFER_FUNC_DEFAULT,
+};
+
+static const struct grb_pix_map grb_pix_map_list[] = {
+	/* TODO: add all missing formats */
+
+	/* RGB formats */
+	{
+		.code = MEDIA_BUS_FMT_ARGB8888_1X32,
+		.pixelformat = V4L2_PIX_FMT_BGR32,
+		.bpp = 4,
+	},
+	/* YCBCR formats */
+	{
+		.code = MEDIA_BUS_FMT_YVYU8_2X8,
+		.pixelformat = V4L2_PIX_FMT_YUV422P,
+		.bpp = 3,
+	},
+};
+
+const struct grb_pix_map *grb_pix_map_by_code(u32 code)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(grb_pix_map_list); i++) {
+		if (grb_pix_map_list[i].code == code)
+			return &grb_pix_map_list[i];
+	}
+	return NULL;
+}
+
+const struct grb_pix_map *grb_pix_map_by_pixelformat(u32 pixelformat)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(grb_pix_map_list); i++) {
+		if (grb_pix_map_list[i].pixelformat == pixelformat)
+			return &grb_pix_map_list[i];
+	}
+	return NULL;
+}
+
 static inline struct grb_graph_entity *
 to_grb_entity(struct v4l2_async_subdev *asd)
 {
