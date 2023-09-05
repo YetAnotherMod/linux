@@ -736,14 +736,17 @@ static int ov2640_s_ctrl(struct v4l2_ctrl *ctrl)
 
 	switch (ctrl->id) {
 	case V4L2_CID_VFLIP:
+		dev_dbg(&client->dev, "%s: VFLIP = %d", __func__, ctrl->val);
 		val = ctrl->val ? REG04_VFLIP_IMG | REG04_VREF_EN : 0x00;
 		return ov2640_mask_set(client, REG04,
 				       REG04_VFLIP_IMG | REG04_VREF_EN, val);
 		/* NOTE: REG04_VREF_EN: 1 line shift / even/odd line swap */
 	case V4L2_CID_HFLIP:
+		dev_dbg(&client->dev, "%s: HFLIP = %d", __func__, ctrl->val);
 		val = ctrl->val ? REG04_HFLIP_IMG : 0x00;
 		return ov2640_mask_set(client, REG04, REG04_HFLIP_IMG, val);
 	case V4L2_CID_TEST_PATTERN:
+		dev_dbg(&client->dev, "%s: TEST_PATTERN = %d", __func__, ctrl->val);
 		val = ctrl->val ? COM7_COLOR_BAR_TEST : 0x00;
 		return ov2640_mask_set(client, COM7, COM7_COLOR_BAR_TEST, val);
 	}
