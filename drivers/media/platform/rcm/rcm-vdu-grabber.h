@@ -4,6 +4,7 @@
 #include <linux/ioctl.h>
 #include <linux/watchdog.h>
 #include <linux/version.h>
+#include <linux/videodev2.h>
 #include <media/media-device.h>
 #include <media/v4l2-async.h>
 #include <media/v4l2-ctrls.h>
