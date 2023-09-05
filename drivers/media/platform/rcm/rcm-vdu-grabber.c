@@ -1094,8 +1094,11 @@ static int vidioc_streamon_grb( struct file *file_ptr, void *fh, enum v4l2_buf_t
 		return retval;
 	}
 
-	dump_all_regs("Dump regs after Enable stream on the sub device", base_addr);
-
+	retval = v4l2_ctrl_handler_setup(&grb_info_ptr->hdl);
+	if( retval < 0 ) {
+		dev_err(grb_info_ptr->dev,  "v4l2_ctrl_handler_setup failed \n");
+		goto err_start_stream;
+	}
 
 	retval = setup_registers( grb_info_ptr );
 	if( retval < 0 ) {
@@ -1269,8 +1272,103 @@ static int vidioc_s_selection_grb( struct file *file, void *fh, struct v4l2_sele
 	return 0;
 }
 
+static int grb_s_ctrl(struct v4l2_ctrl *ctrl)
+{
+	struct grb_info *grb =
+		container_of(ctrl->handler, struct grb_info, hdl);
+
+	switch (ctrl->id) {
+	case RCM_GRB_CID_SYNC:
+		GRB_DBG_PRINT( "%s: sync=%d\n", __func__, ctrl->val);
+		grb->param.sync = ctrl->val;
+		break;
+	case RCM_GRB_CID_STD_IN:
+		GRB_DBG_PRINT( "%s: std_in=%d\n", __func__, ctrl->val);
+		grb->param.std_in = ctrl->val;
+		break;
+	case RCM_GRB_CID_D_V_IF:
+		GRB_DBG_PRINT( "%s: v_if=%d\n", __func__, ctrl->val);
+		grb->param.v_if = ctrl->val;
+		break;
+	case RCM_GRB_CID_D_FORMAT:
+		GRB_DBG_PRINT( "%s: d_format=%d\n", __func__, ctrl->val);
+		grb->param.d_format = ctrl->val;
+		break;
+	case RCM_GRB_CID_STD_OUT:
+		GRB_DBG_PRINT( "%s: std_out=%d\n", __func__, ctrl->val);
+		grb->param.std_out = ctrl->val;
+		break;
+
+	default:
+		return -EINVAL;
+	}
+
+	//set_input_format( grb );
+	return 0;
+}
+
+static const struct v4l2_ctrl_ops grb_ctrl_ops = {
+	.s_ctrl = grb_s_ctrl,
+};
+
+static const struct v4l2_ctrl_config grb_sync = {
+	.ops = &grb_ctrl_ops,
+	.id = RCM_GRB_CID_SYNC,
+	.name = "sync",
+	.type = V4L2_CTRL_TYPE_INTEGER,
+	.def = SYNC_EXTERNAL,
+	.min = 0,
+	.max = 1,
+	.step = 1,
+};
+
+static const struct v4l2_ctrl_config grb_stdin = {
+	.ops = &grb_ctrl_ops,
+	.id = RCM_GRB_CID_STD_IN,
+	.name = "stdin",
+	.type = V4L2_CTRL_TYPE_INTEGER,
+	.def = STD_CLR_SD,
+	.min = 0,
+	.max = 1,
+	.step = 1,
+};
+
+static const struct v4l2_ctrl_config grb_dvif = {
+	.ops = &grb_ctrl_ops,
+	.id = RCM_GRB_CID_D_V_IF,
+	.name = "dvif",
+	.type = V4L2_CTRL_TYPE_INTEGER,
+	.def = V_IF_SERIAL,
+	.min = 0,
+	.max = 1,
+	.step = 1,
+};
+
+static const struct v4l2_ctrl_config grb_dformat = {
+	.ops = &grb_ctrl_ops,
+	.id = RCM_GRB_CID_D_FORMAT,
+	.name = "dformat",
+	.type = V4L2_CTRL_TYPE_INTEGER,
+	.def = D_FMT_YCBCR422,
+	.min = 0,
+	.max = 2,
+	.step = 1,
+};
+
+static const struct v4l2_ctrl_config grb_stdout = {
+	.ops = &grb_ctrl_ops,
+	.id = RCM_GRB_CID_STD_OUT,
+	.name = "stdout",
+	.type = V4L2_CTRL_TYPE_INTEGER,
+	.def = STD_CLR_SD,
+	.min = 0,
+	.max = 1,
+	.step = 1,
+};
+
+#if 0
 static int vidioc_queryctrl_grb( struct file *file, void *fh, struct v4l2_queryctrl *a ) {
-	GRB_DBG_PRINT( "vidioc_queryctrl_grb entry: id=%x,type=%x,name=%s\n", a->id, a->type, a->name )
+	//GRB_DBG_PRINT( "vidioc_queryctrl_grb entry: id=%x,type=%x,name=%s\n", a->id, a->type, a->name )
 	switch( a->id ) {
 	case RCM_GRB_CID_SYNC:
 		strlcpy( a->name, "sync", sizeof(a->name) );
@@ -1361,6 +1459,7 @@ static int vidioc_g_ctrl_grb( struct file *file, void *fh, struct v4l2_control *
 	}
 	return 0;
 }
+#endif
 
 static int vidioc_enum_frameintervals_grb( struct file *file, void *fh, struct v4l2_frmivalenum *fival ) {
 	GRB_DBG_PRINT( "vidioc_enum_frameintervals: index=%u,pixel_format=%08x,width=%u,height=%u,type=%u\n",
@@ -1441,9 +1540,9 @@ static const struct v4l2_ioctl_ops grb_ioctl_ops = {
 	.vidioc_default				= vidioc_default_grb,
 	.vidioc_g_selection			= vidioc_g_selection_grb,
 	.vidioc_s_selection			= vidioc_s_selection_grb,
-	.vidioc_queryctrl			= vidioc_queryctrl_grb,
-	.vidioc_g_ctrl				= vidioc_g_ctrl_grb,					// for future modification
-	.vidioc_s_ctrl				= vidioc_s_ctrl_grb,					// ...
+//	.vidioc_queryctrl			= vidioc_queryctrl_grb,
+//	.vidioc_g_ctrl				= vidioc_g_ctrl_grb,					// for future modification
+//	.vidioc_s_ctrl				= vidioc_s_ctrl_grb,					// ...
 	.vidioc_enum_frameintervals	= vidioc_enum_frameintervals_grb,
 	.vidioc_enum_framesizes		= vidioc_enum_framesizes_grb,
 	.vidioc_g_parm				= vidioc_g_parm_grb,
@@ -1567,7 +1666,11 @@ static int grb_graph_notify_complete(struct v4l2_async_notifier *notifier)
 	struct grb_info *grb = notifier_to_grb(notifier);
 	int ret;
 
-	grb->video_dev.ctrl_handler = grb->entity.subdev->ctrl_handler;
+	if(grb->entity.subdev)
+		v4l2_ctrl_add_handler(grb->v4l2_dev.ctrl_handler, grb->entity.subdev->ctrl_handler, NULL, true);
+
+	//grb->video_dev.ctrl_handler = grb->entity.subdev->ctrl_handler;
+
 #if 0 //need correct
 	ret = grb_formats_init(grb);
 	if (ret) {
@@ -1867,10 +1970,10 @@ static int device_probe( struct platform_device *grb_device ) {
 
 //	grb_info_ptr->in_f.format_din = xx;			// it'default value
 	grb_info_ptr->param.sync = SYNC_EXTERNAL;
-	grb_info_ptr->param.std_in = STD_CLR_HD;
+	grb_info_ptr->param.std_in = STD_CLR_SD;
 	grb_info_ptr->param.v_if = V_IF_SERIAL;
 	grb_info_ptr->param.d_format = D_FMT_YCBCR422;
-	grb_info_ptr->param.std_out = STD_CLR_HD;
+	grb_info_ptr->param.std_out = STD_CLR_SD;
 	grb_info_ptr->param.alpha = 255;
 	set_input_format( grb_info_ptr );
 
@@ -1904,6 +2007,26 @@ static int device_probe( struct platform_device *grb_device ) {
 		dev_err( grb_info_ptr->dev, "failed media pad init %d\n", err );
 		goto err_release_dev;
 	}
+
+	err = v4l2_ctrl_handler_init(&grb_info_ptr->hdl, 5);
+	if (err) {
+		goto err_release_dev;
+	}
+
+	v4l2_ctrl_new_custom(&grb_info_ptr->hdl, &grb_sync, NULL);
+	v4l2_ctrl_new_custom(&grb_info_ptr->hdl, &grb_stdin, NULL);
+	v4l2_ctrl_new_custom(&grb_info_ptr->hdl, &grb_dvif, NULL);
+	v4l2_ctrl_new_custom(&grb_info_ptr->hdl, &grb_dformat, NULL);
+	v4l2_ctrl_new_custom(&grb_info_ptr->hdl, &grb_stdout, NULL);
+	grb_info_ptr->v4l2_dev.ctrl_handler = &grb_info_ptr->hdl;
+
+	if (grb_info_ptr->hdl.error) {
+		err = grb_info_ptr->hdl.error;
+		dev_err(grb_info_ptr->dev, "Failed to add ctrl\n");
+		goto err_release_dev;
+	}
+
+	v4l2_ctrl_handler_setup(&grb_info_ptr->hdl);
 
 	video_set_drvdata( &grb_info_ptr->video_dev , grb_info_ptr );
 //	err = video_register_device( &grb_info_ptr->video_dev, VFL_TYPE_GRABBER, -1 );
@@ -1940,6 +2063,7 @@ static int device_probe( struct platform_device *grb_device ) {
 	return 0;
 
 err_release_dev:
+	v4l2_ctrl_handler_free(&grb_info_ptr->hdl);
 	video_unregister_device( &grb_info_ptr->video_dev ); 
 err_media_clean:
 	media_device_cleanup(&grb_info_ptr->media_dev);
@@ -1957,6 +2081,7 @@ static int device_remove( struct platform_device* grb_device )
 	grb_info_ptr = platform_get_drvdata(grb_device);
 	reset_grab( grb_info_ptr->base_addr_regs_grb );
 
+	v4l2_ctrl_handler_free(&grb_info_ptr->hdl);
 	video_unregister_device( &grb_info_ptr->video_dev );
 	media_device_unregister(&grb_info_ptr->media_dev);
 	media_device_cleanup(&grb_info_ptr->media_dev);
