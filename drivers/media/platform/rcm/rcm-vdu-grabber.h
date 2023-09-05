@@ -109,11 +109,11 @@
 	#define SYNC_EXTERNAL		0
 	#define SYNC_INTERNAL		1
 
-	#define RCM_GRB_CID_SYNC		(V4L2_CID_PRIVATE_BASE + 0)	// SYNC_xx..
-	#define RCM_GRB_CID_STD_IN		(V4L2_CID_PRIVATE_BASE + 1)	// STD_CLR_xx
-	#define RCM_GRB_CID_D_V_IF		(V4L2_CID_PRIVATE_BASE + 2)	// V_IF_xx..
-	#define RCM_GRB_CID_D_FORMAT	(V4L2_CID_PRIVATE_BASE + 3)	// D_FMT_xx..
-	#define RCM_GRB_CID_STD_OUT		(V4L2_CID_PRIVATE_BASE + 4)	// STD_CLR_xx
+	#define RCM_GRB_CID_SYNC		(V4L2_CID_USER_BASE | 0x1101)	// SYNC_xx..
+	#define RCM_GRB_CID_STD_IN		(V4L2_CID_USER_BASE | 0x1102)	// STD_CLR_xx
+	#define RCM_GRB_CID_D_V_IF		(V4L2_CID_USER_BASE | 0x1103)	// V_IF_xx..
+	#define RCM_GRB_CID_D_FORMAT	(V4L2_CID_USER_BASE | 0x1104)	// D_FMT_xx..
+	#define RCM_GRB_CID_STD_OUT		(V4L2_CID_USER_BASE | 0x1105)	// STD_CLR_xx
 
 // custom code - todo standard
 	#define VIDIOC_SET_GAMMA		_IOWR('v', BASE_VIDIOC_PRIVATE + 0, struct grb_gamma)
