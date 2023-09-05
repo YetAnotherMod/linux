@@ -159,9 +159,11 @@ static void print_videobuf_queue_param2( struct videobuf_queue* queue, int num, 
 	} 
 }
 
+/*
 static void print_four_cc( const char* info, unsigned int f ) {
 	GRB_DBG_PRINT( "%s: '%c%c%c%c'", info, (u8)(f>>0), (u8)(f>>8), (u8)(f>>16), (u8)(f>>24) )
 }
+*/
 
 /*
 static void print_v4l2_selection( const char* info, int arg, const struct v4l2_selection* s ) {
@@ -426,8 +428,6 @@ static int setup_color( struct grb_info *grb_info_ptr, void __iomem* base_addr )
 		}
 	}
 	else if( (color_in == YCBCR) && (color_out == YCBCR) ) {
-		GRB_DBG_PRINT( "enable conversion colour standard  for YCBCR.\n" )
-
 		if( (color_std_in == STD_CLR_SD) && (color_std_out == STD_CLR_HD) ) {
 			GRB_DBG_PRINT( "YCBCR SD->HD\n" )
 			grb_info_ptr->c_conv = &YCBCR_SD_TO_HD;
@@ -436,9 +436,15 @@ static int setup_color( struct grb_info *grb_info_ptr, void __iomem* base_addr )
 			GRB_DBG_PRINT( "YCBCR HD->SD\n" )
 			grb_info_ptr->c_conv = &YCBCR_HD_TO_SD;
 		}
+		else {
+			GRB_DBG_PRINT( "not need color conversion\n" )
+			grb_info_ptr->c_conv = NULL;
 	}
-	else // not need color conversion
+	}
+	else { // not need color conversion
+		GRB_DBG_PRINT( "not need color conversion\n" )
 		grb_info_ptr->c_conv = NULL;
+	}
 	
 	write_register( 0, base_addr, ADDR_CONV_ENABLE );
 
@@ -539,11 +545,13 @@ int setup_registers( struct grb_info *grb_info_ptr ) {
 	u32 format_din;
 	u32 format_dout;
 
+	set_input_format( grb_info_ptr );
+
 	format_din  = grb_info_ptr->in_f.format_din;
 	format_dout = grb_info_ptr->out_f.format_dout;
 	GRB_DBG_PRINT( "format_din: 0x%0x, format_dout: 0x%0x\n", format_din, format_dout )
 
-	if( grb_info_ptr->cropping.width != 0 && grb_info_ptr->cropping.height !=0 ) {
+	if( grb_info_ptr->cropping.width >= RCM_GRB_MIN_SUPPORT_WIDTH && grb_info_ptr->cropping.height >= RCM_GRB_MIN_SUPPORT_HEIGHT ) {
 		y_hor_size	= grb_info_ptr->cropping.width;
 		y_ver_size	= grb_info_ptr->cropping.height;
 		c_hor_size	= grb_info_ptr->cropping.width;
@@ -1007,6 +1015,13 @@ static int vidioc_reqbufs_grb ( struct file *file_ptr, void *fh, struct v4l2_req
 	unsigned long flags;
 	int ret;
 	GRB_DBG_PRINT_PROC_CALL
+
+	if (req->type != V4L2_BUF_TYPE_VIDEO_CAPTURE ||
+		req->memory != V4L2_MEMORY_MMAP) {
+		GRB_DBG_PRINT( "Invalid buffer type or memory\n" )
+		return -EINVAL;
+	}
+
 	spin_lock_irqsave( &grb_info_ptr->irq_lock, flags );
 	INIT_LIST_HEAD( &grb_info_ptr->buffer_queue );
 	spin_unlock_irqrestore( &grb_info_ptr->irq_lock, flags );
@@ -1017,7 +1032,14 @@ static int vidioc_reqbufs_grb ( struct file *file_ptr, void *fh, struct v4l2_req
 
 static int vidioc_querybuf_grb( struct file *file_ptr, void *fh, struct v4l2_buffer *buf ) {
 	struct grb_info *grb_info_ptr = video_drvdata(file_ptr);
-	int ret = videobuf_querybuf(&grb_info_ptr->videobuf_queue_grb, buf);
+	int ret;
+
+	if (buf->type != V4L2_BUF_TYPE_VIDEO_CAPTURE) {
+		GRB_DBG_PRINT( "Invalid buffer type\n" )
+		return  -EINVAL;
+	}
+
+	ret = videobuf_querybuf(&grb_info_ptr->videobuf_queue_grb, buf);
 	print_v4l2_buffer( "vidioc_querybuf_grb", buf );
 	print_videobuf_queue_param( &grb_info_ptr->videobuf_queue_grb, 4 );
 	return ret;
@@ -1025,7 +1047,14 @@ static int vidioc_querybuf_grb( struct file *file_ptr, void *fh, struct v4l2_buf
 
 static int vidioc_qbuf_grb( struct file *file_ptr, void *fh, struct v4l2_buffer *buf ) {
 	struct grb_info *grb_info_ptr = video_drvdata(file_ptr);
-	int ret = videobuf_qbuf(&grb_info_ptr->videobuf_queue_grb, buf);
+	int ret;
+
+	if (buf->type != V4L2_BUF_TYPE_VIDEO_CAPTURE) {
+		GRB_DBG_PRINT( "Invalid buffer type\n" )
+		return  -EINVAL;
+	}
+
+	ret = videobuf_qbuf(&grb_info_ptr->videobuf_queue_grb, buf);
 	print_v4l2_buffer( "vidioc_qbuf_grb", buf );
 	print_videobuf_queue_param( &grb_info_ptr->videobuf_queue_grb, 4 );
 	return ret;
@@ -1034,7 +1063,14 @@ static int vidioc_qbuf_grb( struct file *file_ptr, void *fh, struct v4l2_buffer 
 static int vidioc_dqbuf_grb( struct file *file_ptr, void *fh, struct v4l2_buffer *buf ) {
 	struct grb_info *grb_info_ptr = video_drvdata(file_ptr);
 	struct videobuf_queue* videobuf_queue = &grb_info_ptr->videobuf_queue_grb;
-	int ret = videobuf_dqbuf( videobuf_queue, buf, file_ptr->f_flags & O_NONBLOCK );
+	int ret;
+
+	if (buf->type != V4L2_BUF_TYPE_VIDEO_CAPTURE) {
+		GRB_DBG_PRINT( "Invalid buffer type\n" )
+		return  -EINVAL;
+	}
+
+	ret = videobuf_dqbuf( videobuf_queue, buf, file_ptr->f_flags & O_NONBLOCK );
 	print_v4l2_buffer( "vidioc_dqbuf_grb", buf );
 	print_videobuf_queue_param( &grb_info_ptr->videobuf_queue_grb, 4 );
 	return ret;
@@ -1364,12 +1400,12 @@ static int vidioc_enum_input_grb( struct file *file, void *fh, struct v4l2_input
 
 	snprintf( inp->name, sizeof(inp->name), "%s(%08x)", RCM_GRB_DEVICE_NAME, (u32)grb_info_ptr->phys_addr_regs_grb );
 	inp->type = V4L2_INPUT_TYPE_CAMERA;
-	inp->audioset = 0;
-	inp->tuner = 0;
-	inp->std = V4L2_STD_ALL;
-	inp->status = 0;		// todo V4L2_IN_ST_NO_SIGNAL,if it's so
+//	inp->audioset = 0;
+//	inp->tuner = 0;
+//	inp->std = V4L2_STD_ALL;
+//	inp->status = 0;		// todo V4L2_IN_ST_NO_SIGNAL,if it's so
 	inp->capabilities = 0;
-	inp->reserved[0] = inp->reserved[1] = inp->reserved[2] = 0;
+//	inp->reserved[0] = inp->reserved[1] = inp->reserved[2] = 0;
 	return 0;
 }
 
@@ -1763,6 +1799,30 @@ static int get_resources( struct platform_device *grb_device, struct grb_info *g
 	return 0;
 }
 
+static int grb_set_default_fmt(struct grb_info *grb_info_ptr)
+{
+	struct v4l2_format f = {
+		.type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+	};
+	int ret;
+
+	f.fmt.pix = fmt_default;
+
+	ret = grb_try_fmt(grb_info_ptr, &f, NULL);
+	if (ret) {
+		GRB_DBG_PRINT( "Failed set default format\n")
+		return ret;
+	}
+
+	grb_info_ptr->recognize_format.width = XGA_WIDTH;		// it's too, but autodetect will set new values
+	grb_info_ptr->recognize_format.height = XGA_HEIGHT;
+	grb_info_ptr->recognize_format.field = V4L2_FIELD_NONE;
+
+	grb_info_ptr->format = f;
+	return 0;
+}
+
+
 static int device_probe( struct platform_device *grb_device ) {
 	struct grb_info *grb_info_ptr;
 	int err;
@@ -1814,9 +1874,7 @@ static int device_probe( struct platform_device *grb_device ) {
 	grb_info_ptr->param.alpha = 255;
 	set_input_format( grb_info_ptr );
 
-	grb_info_ptr->recognize_format.width = 640;		// it's too,but autodetect will set new values
-	grb_info_ptr->recognize_format.height = 480;
-	grb_info_ptr->recognize_format.field = V4L2_FIELD_NONE;
+	grb_set_default_fmt(grb_info_ptr);
 
 	grb_info_ptr->cropping.left = 0;
 	grb_info_ptr->cropping.top = 0;
