@@ -133,6 +133,28 @@
 
 	#define NUM_OUTPUT_FORMATS 4
 
+	#define RCM_GRB_MAX_SUPPORT_WIDTH   1920
+	#define RCM_GRB_MAX_SUPPORT_HEIGHT  1080
+	#define RCM_GRB_MIN_SUPPORT_WIDTH   16
+	#define RCM_GRB_MIN_SUPPORT_HEIGHT  16
+
+	/**
+	 * struct vimc_pix_map - maps media bus code with v4l2 pixel format
+	 *
+	 * @code:		media bus format code defined by MEDIA_BUS_FMT_* macros
+	 * @bbp:		number of bytes each pixel occupies
+	 * @pixelformat:	pixel format devined by V4L2_PIX_FMT_* macros
+	 *
+	 * Struct which matches the MEDIA_BUS_FMT_* codes with the corresponding
+	 * V4L2_PIX_FMT_* fourcc pixelformat and its bytes per pixel (bpp)
+	 */
+	struct grb_pix_map {
+		unsigned int code;
+		unsigned int bpp;
+		u32 pixelformat;
+	};
+
+
 	struct grb_parameters {
 		u32 sync;
 		u32 std_in;
@@ -220,6 +242,7 @@ struct grb_graph_entity {
 struct grb_info {
 	struct device *dev;
 	struct video_device video_dev;
+	struct v4l2_ctrl_handler hdl;
 	struct videobuf_queue videobuf_queue_grb;
 	struct videobuf_buffer* cur_buf;
 	struct list_head buffer_queue;
@@ -235,6 +258,7 @@ struct grb_info {
 	struct v4l2_pix_format user_format;
 	struct v4l2_rect cropping;
 	struct v4l2_pix_format recognize_format;
+	struct v4l2_format format;
 
 	struct media_pad pad;
 
