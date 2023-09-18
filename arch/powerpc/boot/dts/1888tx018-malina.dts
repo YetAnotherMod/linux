@@ -48,6 +48,12 @@
 		clock-output-names = "refclk";
 	};
 
+	cec: cec {
+		#clock-cells = <0>;
+		compatible = "fixed-clock";
+		clock-frequency = <25000000>;
+	};
+
 	vsys_5v: vsys_5v {
 		status = "okay";
 		compatible = "regulator-fixed";
@@ -276,6 +282,9 @@
 					adi,input-clock = "1x";
 					adi,input-style = <1>;
 					adi,input-justification = "evenly";
+
+					clocks = <&cec>;
+					clock-names = "cec";
 
 					pd-gpios = <&gpio1 2 0>; /* Power Down */
 
