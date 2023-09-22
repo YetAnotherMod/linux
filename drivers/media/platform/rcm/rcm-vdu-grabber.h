@@ -13,10 +13,15 @@
 	// CONTROL
 	#define ADDR_ID_REG           0x000
 	#define ADDR_ENABLE           0x004
+		#define CAPTURE_START     1
+		#define CAPTURE_STOP      0
+
 	#define ADDR_PR_RESET         0x008
 	#define ADDR_REC_ENABLE       0x00c
 	// STATUS
-	#define ADDR_ACTIVE_FRAME     0x100
+	#define ADDR_GRB_STATUS       0x100
+		#define BIT_ACTIVE_FRAME  (1<<0)
+
 	#define ADDR_FRAME_SIZE       0x104
 	#define ADDR_FRAME_PARAM      0x108
 	#define ADDR_DMA0_STATUS      0x10c
@@ -122,6 +127,7 @@
 	#define VIDIOC_S_PARAMS			_IOWR('v', BASE_VIDIOC_PRIVATE + 2, struct grb_parameters)
 	#define VIDIOC_AUTO_DETECT		_IOWR('v', BASE_VIDIOC_PRIVATE + 3, struct grb_parameters)
 
+	#define RCM_GRB_MODULE_NAME	"grabber"
 	#define RCM_GRB_DEVICE_NAME "rcm_vdu_grb_dev"
 	#define RCM_GRB_DRIVER_NAME "rcm_vdu_grb_drv"
 	#define RCM_GRB_DRIVER_VERSION KERNEL_VERSION(1,0,0)
@@ -138,6 +144,13 @@
 	#define RCM_GRB_MAX_SUPPORT_HEIGHT  1080
 	#define RCM_GRB_MIN_SUPPORT_WIDTH   16
 	#define RCM_GRB_MIN_SUPPORT_HEIGHT  16
+
+	#define MIN_FRAME_RATE				5
+	#define FRAME_INTERVAL_MILLI_SEC	(1000 / MIN_FRAME_RATE)
+
+	#define ODD_ACTIVE_FRAME			0
+	#define EVEN_ACTIVE_FRAME			1
+	#define RCM_GRB_MAX_FRAME			2
 
 	/**
 	 * struct vimc_pix_map - maps media bus code with v4l2 pixel format
@@ -240,41 +253,58 @@ struct grb_graph_entity {
 	struct v4l2_subdev *subdev;
 };
 
+struct frame_buffer {
+	struct vb2_v4l2_buffer	vb;
+	struct list_head	list;
+};
+
 struct grb_info {
 	struct device *dev;
-	struct video_device video_dev;
-	struct v4l2_ctrl_handler hdl;
-	struct videobuf_queue videobuf_queue_grb;
-	struct videobuf_buffer* cur_buf;
-	struct list_head buffer_queue;
-	unsigned int frame_count;
-	unsigned int reqv_buf_cnt;
-	unsigned int next_buf_num;
-	int num_irq;
-	//wait_queue_head_t wait_queue;
-	struct completion cmpl;
-	spinlock_t irq_lock;
-	struct v4l2_device v4l2_dev;
+
+	/* Media and V4L2 device */
 	struct media_device media_dev;
+	struct v4l2_device 	v4l2_dev;
+	struct v4l2_async_notifier	notifier;
+	struct v4l2_ctrl_handler hdl;
+	struct media_pad pad;
+	struct grb_graph_entity		entity;
 	struct v4l2_rect cropping;
 	struct v4l2_pix_format recognize_format;
 	struct v4l2_format format;
 
-	struct media_pad pad;
-
-	struct v4l2_async_notifier	notifier;
-	struct grb_graph_entity		entity;
-
+	/* V4L2 subdev */
 	struct v4l2_subdev *src_subdev;
 	int src_pad;
+
+	/* Video device */
+	struct video_device video_dev;
+
+	/* Videobuf2 */
+	struct mutex			lock;
+	struct vb2_queue		queue;
+	struct list_head		buf_list;
+	unsigned int			sequence;
+	struct vb2_v4l2_buffer	*current_buf[RCM_GRB_MAX_FRAME];
+	unsigned int 			reqv_buf_cnt;
+
+//	struct videobuf_queue videobuf_queue_grb;
+//	struct videobuf_buffer* cur_buf;
+//	struct list_head buffer_queue;
+//	unsigned int next_buf_num;
+	//wait_queue_head_t wait_queue;
+	struct completion cmpl;
+	spinlock_t irq_lock;
+	unsigned int irq;
 
 	struct input_format in_f;
 	struct output_format out_f;
 	struct grb_parameters param;
 	struct grb_gamma gam;
 	const struct coef_conv* c_conv;
-	phys_addr_t phys_addr_regs_grb;
-	void __iomem *base_addr_regs_grb;
+
+	phys_addr_t phys_addr_regs;
+	void __iomem *regs;
+
 	phys_addr_t buff_phys_addr;
 	dma_addr_t buff_dma_addr;
 	void* kern_virt_addr;

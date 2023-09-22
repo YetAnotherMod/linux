@@ -1,44 +1,47 @@
-#include <linux/list.h>
-#include <linux/device.h>
-#include <linux/delay.h>
-#include <linux/fs.h>
-#include <linux/gfp.h>  //??? may be don"t need
-#include <linux/init.h>
-#include <linux/interrupt.h>
-#include <linux/mm.h>  //??? may be don"t need
-#include <linux/module.h>
-#include <linux/pci.h>
-#include <linux/platform_device.h>
-#include <linux/slab.h>
+/*
+ * RCM SoC video capture device driver
+ *
+ * 
+ */
+
+#include <linux/types.h>
 #include <linux/string.h>
-#include <linux/videodev2.h>
-#include <linux/vmalloc.h>
-#include <linux/dma-mapping.h>
-#include <linux/of_platform.h>
+#include <linux/list.h>
+#include <linux/delay.h>
+#include <linux/kernel.h>
+#include <linux/mutex.h>
+#include <linux/interrupt.h>
+#include <linux/module.h>
+
+#include <linux/of.h>
 #include <linux/of_graph.h>
+#include <linux/of_address.h>
+#include <linux/platform_device.h>
 
-#include <media/videobuf-dma-contig.h>
-#include <media/videobuf-core.h>
-#include <media/v4l2-common.h>
-#include <media/v4l2-dev.h>
+#include <linux/videodev2.h>
+#include <media/v4l2-async.h>
 #include <media/v4l2-device.h>
-#include <media/v4l2-ioctl.h>
-#include <media/v4l2-mediabus.h>
+#include <media/v4l2-dev.h>
+#include <media/v4l2-ctrls.h>
+#include <media/v4l2-event.h>
 #include <media/v4l2-fwnode.h>
+#include <media/v4l2-ioctl.h>
+#include <media/v4l2-rect.h>
+#include <media/v4l2-mediabus.h>
 #include <media/v4l2-image-sizes.h>
-
-#include <asm/delay.h>
-#include <asm/io.h>
-#include <asm/page.h>
-//#include <asm/segment.h>
-#include <asm/uaccess.h>
+#include <media/v4l2-subdev.h>
+#include <media/media-device.h>
+#include <media/videobuf2-core.h>
+#include <media/videobuf2-v4l2.h>
+#include <media/videobuf2-dma-contig.h>
 
 #include "rcm-vdu-grabber.h"
 
+//#define DEBUG 1
 //#define RCM_VDU_GRB_DBG
 
 #ifdef RCM_VDU_GRB_DBG
-	#define GRB_DBG_PRINT(...) printk( KERN_DEBUG "[VDU_GRABER] " __VA_ARGS__ );
+	#define GRB_DBG_PRINT(...) printk( KERN_DEBUG "[VDU_GRABBER] " __VA_ARGS__ );
 #else
 	#define GRB_DBG_PRINT(...) while(0);
 #endif
@@ -48,13 +51,6 @@
 enum {
 	RCM_VDU_GRB_SINK,
 	RCM_VDU_GRB_NR_PADS
-};
-
-struct videobuf_dma_contig_memory {
-	u32 magic;
-	void *vaddr;
-	dma_addr_t dma_handle;
-	unsigned long size;
 };
 
 static const struct v4l2_pix_format fmt_default = {
@@ -83,7 +79,7 @@ static const struct grb_pix_map grb_pix_map_list[] = {
 	},
 	/* YCBCR formats */
 	{
-		.code = MEDIA_BUS_FMT_YVYU8_2X8,
+		.code = MEDIA_BUS_FMT_UYVY8_2X8,
 		.pixelformat = V4L2_PIX_FMT_YUV422P,
 		.bpp = 3,
 	},
@@ -132,33 +128,6 @@ static void print_v4l2_pix_format( struct v4l2_pix_format* fmt ) {
 	}
 }
 
-static void print_videobuf_queue_param( struct videobuf_queue* queue, unsigned int num ) {
-	unsigned int i=0 ;
-	struct videobuf_dma_contig_memory* mem;
-	struct videobuf_buffer* vb;
-	for( i=0; i<num; i++ ) {
-		vb = queue->bufs[i];		// buffer ptr
-		if( vb ) {
-			mem = vb->priv;			// memory area
-			GRB_DBG_PRINT( "videobuf_buffer(%u): memory=%u,vaddr=0x%x,dma_handle=0x%x,size=0x%lx: %*ph\n",
-						   i, vb->memory, (u32)mem->vaddr, (u32)mem->dma_handle, mem->size, 16, mem->vaddr )
-		}
-	}
-}
-
-static void print_videobuf_queue_param2( struct videobuf_queue* queue, int num, int off0, int off1, int off2 ) {
-	struct videobuf_dma_contig_memory* mem;
-	struct videobuf_buffer* vb = queue->bufs[num];
-	if( vb ) {
-		u32 p0, p1, p2;
-		mem = vb->priv;
-		p0 = (u32)(mem->vaddr+off0), p1 = (u32)(mem->vaddr+off1), p2 = (u32)(mem->vaddr+off2);
-		GRB_DBG_PRINT( "videobuf_buffer: memory=%u,vaddr=0x%x,dma_handle=0x%x,size=0x%lx:\n%08x:%*ph\n%08x:%*ph\n%08x:%*ph\n",
-				 	   vb->memory, (u32)mem->vaddr, (u32)mem->dma_handle, mem->size,
-					   p0, 8, (void*)p0, p1, 8, (void*)p1, p2, 8, (void*)p2 )
-	} 
-}
-
 /*
 static void print_four_cc( const char* info, unsigned int f ) {
 	GRB_DBG_PRINT( "%s: '%c%c%c%c'", info, (u8)(f>>0), (u8)(f>>8), (u8)(f>>16), (u8)(f>>24) )
@@ -181,10 +150,6 @@ static void print_v4l2_format( const char* info, int arg, const struct v4l2_form
 					f->fmt.pix.ycbcr_enc, f->fmt.pix.quantization, f->fmt.pix.xfer_func )
 }
 
-static void print_v4l2_buffer( const char* info, const struct v4l2_buffer* b ) {
-	GRB_DBG_PRINT( "%s: index=0x%x,type=0x%x,bytesused=0x%x,flags=0x%x,field=0x%x,sequence=0x%x,memory=0x%x,offset=0x%x,length=0x%x\n",
-					info, b->index, b->type, b->bytesused, b->flags, b->field, b->sequence, b->memory, b->m.offset, b->length )
-}
 
 static inline void write_register( u32 val, void __iomem *addr, u32 offset ) {
 	iowrite32( val, addr + offset );
@@ -214,20 +179,14 @@ static inline void print_registers( void __iomem *addr, unsigned int begin, unsi
 	}
 }
 
-static void dump_all_regs(char *info, void __iomem *addr) {
-#if 0
-	GRB_DBG_PRINT("*s:\n", info);
-	GRB_DBG_PRINT("CONTROL group:\n");
-	print_registers(addr, ADDR_ID_REG, ADDR_REC_ENABLE);
-	GRB_DBG_PRINT("STATUS group:\n");
-	print_registers(addr, ADDR_ACTIVE_FRAME, ADDR_DMA_ERROR);
-	GRB_DBG_PRINT("INTERRUPT group:\n");
-	print_registers(addr, ADDR_INT_STATUS, ADDR_INTERRUPTION);
-	GRB_DBG_PRINT("COLOR_CONVERSION group:\n");
-	print_registers(addr, ADDR_GAM_ENABLE, ADDR_CH2_RANGE);
-	GRB_DBG_PRINT("DMA_WR group:\n");
-	print_registers(addr, ADDR_BASE_SW_ENA, ADDR_AXI_PARAM);
-#endif
+static inline void capture_start(struct grb_info *grb)
+{
+	write_register(CAPTURE_START, grb->regs, ADDR_ENABLE);
+}
+
+static void capture_stop(struct grb_info *grb)
+{
+	write_register(CAPTURE_STOP, grb->regs, ADDR_ENABLE);
 }
 
 static int reset_grab( void __iomem *addr ) {
@@ -242,8 +201,8 @@ static int reset_grab( void __iomem *addr ) {
 	return -1;
 }
 
-static int set_input_format( struct grb_info *grb_info_ptr ) {
-	struct grb_parameters *param = &grb_info_ptr->param;
+static int set_input_format( struct grb_info *grb ) {
+	struct grb_parameters *param = &grb->param;
 	u32 active_bus;
 	u32 format_data;
 
@@ -274,7 +233,7 @@ static int set_input_format( struct grb_info *grb_info_ptr ) {
 			GRB_DBG_PRINT( "invalid parameter param.std_in!\n" )
 			return -EINVAL;
 		}
-		grb_info_ptr->in_f.color = YCBCR;
+		grb->in_f.color = YCBCR;
 		GRB_DBG_PRINT( "input format is YCBCR 4:2:2\n" )
 	}
 	else if( param->d_format == D_FMT_YCBCR444 ) {		// 1
@@ -282,7 +241,7 @@ static int set_input_format( struct grb_info *grb_info_ptr ) {
 		GRB_DBG_PRINT( "input format data is YCbCr\n" )
 		active_bus  = 0x3 ;								// d0,d1,d2
 		GRB_DBG_PRINT( "input active bus is d0,d1,d2\n" )
-		grb_info_ptr->in_f.color = YCBCR;
+		grb->in_f.color = YCBCR;
 		GRB_DBG_PRINT( "input format is YCBCR 4:4:4\n" ) 
 	} 
 	else if( param->d_format == D_FMT_RGB888 ) {		// 1
@@ -290,25 +249,25 @@ static int set_input_format( struct grb_info *grb_info_ptr ) {
 		GRB_DBG_PRINT( "input format data is RGB\n" )
 		active_bus  = 0x3 ;								// d0,d1,d2
 		GRB_DBG_PRINT( "input active bus is d0,d1,d2\n" )
-		grb_info_ptr->in_f.color = RGB ;
+		grb->in_f.color = RGB ;
 		GRB_DBG_PRINT( "input format is RGB 8:8:8\n" ) 
 	}
 	else {
 		active_bus  = 0x0;
 		format_data = 0x0;
-		grb_info_ptr->in_f.color = 0x0;
+		grb->in_f.color = 0x0;
 		GRB_DBG_PRINT( "std_grb: unknown standard \n" )
 		return -EINVAL;
 	}
 
-	grb_info_ptr->in_f.format_din = format_data;			// 1–RGB,0-YCbCr
-	grb_info_ptr->in_f.format_din |= (active_bus << 1) ;	// 1–dv0;2–dv0,dv1;3–dv0,dv1,dv2
-	grb_info_ptr->in_f.format_din |= (param->std_in << 3) ;	// 0-not duplication,1–duplication (SDTV)
-	grb_info_ptr->in_f.format_din |= (param->sync << 4) ;	// synchronization: 0–external(hsync,vsync,field,data_enable); 1–internal(EAV,SAV)
+	grb->in_f.format_din = format_data;			// 1–RGB,0-YCbCr
+	grb->in_f.format_din |= (active_bus << 1) ;	// 1–dv0;2–dv0,dv1;3–dv0,dv1,dv2
+	grb->in_f.format_din |= (param->std_in << 3) ;	// 0-not duplication,1–duplication (SDTV)
+	grb->in_f.format_din |= (param->sync << 4) ;	// synchronization: 0–external(hsync,vsync,field,data_enable); 1–internal(EAV,SAV)
 
-	grb_info_ptr->in_f.color_std = param->std_in;			// input mode
+	grb->in_f.color_std = param->std_in;			// input mode
 	GRB_DBG_PRINT( "input mode is %s (%x)\n", param->std_in == STD_CLR_SD ? "SD" : "HD", param->std_in)
-	grb_info_ptr->out_f.color_std = param->std_out;			// output mode (SD,HD)
+	grb->out_f.color_std = param->std_out;			// output mode (SD,HD)
 	GRB_DBG_PRINT( "output mode is %s (%x)\n", param->std_out == STD_CLR_SD ? "SD" : "HD", param->std_out)
 
 	if( param->alpha > 255 ) { 
@@ -318,83 +277,82 @@ static int set_input_format( struct grb_info *grb_info_ptr ) {
 	return 0;
 }
 
-static int set_output_format( struct grb_info *grb_info_ptr, struct v4l2_format *v4l2_format_ptr ) {
+static int set_output_format( struct grb_info *grb ) {
 // 0:   0-YCBCR, 1-RGB
 // 2,1: 01–ARGB8888, 10–YCbCr422, 11-YCbCr444,YCbCr422 too?,RGB888
 // 3:   0–YCbCr422, 1–YCbCr444
+	struct v4l2_pix_format *pix_fmt = &grb->format.fmt.pix;
 
-	grb_info_ptr->format.fmt.pix = v4l2_format_ptr->fmt.pix;
+	grb->out_f.y_hor_size = pix_fmt->width;
+	grb->out_f.y_ver_size = pix_fmt->height;
 
-	grb_info_ptr->out_f.y_hor_size = v4l2_format_ptr->fmt.pix.width;
-	grb_info_ptr->out_f.y_ver_size = v4l2_format_ptr->fmt.pix.height;
-
-	switch( v4l2_format_ptr->fmt.pix.pixelformat ) {
+	switch( pix_fmt->pixelformat ) {
 	case V4L2_PIX_FMT_BGR32:									// 'BGR4'='BGRx'
-		grb_info_ptr->out_f.format_dout = 0x03;
-		grb_info_ptr->out_f.color = RGB;
-		grb_info_ptr->out_f.y_full_size = v4l2_format_ptr->fmt.pix.bytesperline/4;
-		grb_info_ptr->out_f.c_hor_size = v4l2_format_ptr->fmt.pix.width;
-		grb_info_ptr->out_f.c_ver_size = v4l2_format_ptr->fmt.pix.height;
-		grb_info_ptr->out_f.c_full_size = v4l2_format_ptr->fmt.pix.bytesperline/4;
+		grb->out_f.format_dout = 0x03;
+		grb->out_f.color = RGB;
+		grb->out_f.y_full_size = pix_fmt->bytesperline/4;
+		grb->out_f.c_hor_size = pix_fmt->width;
+		grb->out_f.c_ver_size = pix_fmt->height;
+		grb->out_f.c_full_size = pix_fmt->bytesperline/4;
 		GRB_DBG_PRINT( "output pixelformat: ARGB8888\n" )
 		break;
 	case V4L2_PIX_FMT_NV16:										// 'NV16'
-		grb_info_ptr->out_f.format_dout = 0x04;
-		grb_info_ptr->out_f.color = YCBCR;
-		grb_info_ptr->out_f.y_full_size = v4l2_format_ptr->fmt.pix.bytesperline;
-		grb_info_ptr->out_f.c_hor_size = v4l2_format_ptr->fmt.pix.width;
-		grb_info_ptr->out_f.c_ver_size = v4l2_format_ptr->fmt.pix.height;
-		grb_info_ptr->out_f.c_full_size = v4l2_format_ptr->fmt.pix.bytesperline;
+		grb->out_f.format_dout = 0x04;
+		grb->out_f.color = YCBCR;
+		grb->out_f.y_full_size = pix_fmt->bytesperline;
+		grb->out_f.c_hor_size = pix_fmt->width;
+		grb->out_f.c_ver_size = pix_fmt->height;
+		grb->out_f.c_full_size = pix_fmt->bytesperline;
 		GRB_DBG_PRINT( "output pixelformat: YCBCR422 two planes\n" )
 		break;
 	case V4L2_PIX_FMT_YUV422P:									// '422P'='Y42B'
-		grb_info_ptr->out_f.format_dout = 0x06;
-		grb_info_ptr->out_f.color = YCBCR;
-		grb_info_ptr->out_f.y_full_size = v4l2_format_ptr->fmt.pix.bytesperline;
-		grb_info_ptr->out_f.c_hor_size = v4l2_format_ptr->fmt.pix.width;
-		grb_info_ptr->out_f.c_ver_size = v4l2_format_ptr->fmt.pix.height;
-		grb_info_ptr->out_f.c_full_size = v4l2_format_ptr->fmt.pix.bytesperline;
+		grb->out_f.format_dout = 0x06;
+		grb->out_f.color = YCBCR;
+		grb->out_f.y_full_size = pix_fmt->bytesperline;
+		grb->out_f.c_hor_size = pix_fmt->width;
+		grb->out_f.c_ver_size = pix_fmt->height;
+		grb->out_f.c_full_size = pix_fmt->bytesperline;
 		GRB_DBG_PRINT( "output pixelformat: YCBCR422 three planes\n" )
 		break;
 	case V4L2_PIX_FMT_YUV444M:									// 'YM24'
-		grb_info_ptr->out_f.format_dout = 0x0e;
-		grb_info_ptr->out_f.color = YCBCR;
-		grb_info_ptr->out_f.y_full_size = v4l2_format_ptr->fmt.pix.bytesperline;
-		grb_info_ptr->out_f.c_hor_size = v4l2_format_ptr->fmt.pix.width;
-		grb_info_ptr->out_f.c_ver_size = v4l2_format_ptr->fmt.pix.height;
-		grb_info_ptr->out_f.c_full_size = v4l2_format_ptr->fmt.pix.bytesperline;
+		grb->out_f.format_dout = 0x0e;
+		grb->out_f.color = YCBCR;
+		grb->out_f.y_full_size = pix_fmt->bytesperline;
+		grb->out_f.c_hor_size = pix_fmt->width;
+		grb->out_f.c_ver_size = pix_fmt->height;
+		grb->out_f.c_full_size = pix_fmt->bytesperline;
 		GRB_DBG_PRINT( "output pixelformat: YCBCR444 three planes.\n" )
 		break;
 	case V4L2_PIX_FMT_RGB24:									// 'RGB3',but planar,no packet!!!Is's bad.
-		grb_info_ptr->out_f.format_dout = 0x07;
-		grb_info_ptr->out_f.color = RGB;
-		grb_info_ptr->out_f.y_full_size = v4l2_format_ptr->fmt.pix.bytesperline;
-		grb_info_ptr->out_f.c_hor_size = v4l2_format_ptr->fmt.pix.width;
-		grb_info_ptr->out_f.c_ver_size = v4l2_format_ptr->fmt.pix.height;
-		grb_info_ptr->out_f.c_full_size = v4l2_format_ptr->fmt.pix.bytesperline;
+		grb->out_f.format_dout = 0x07;
+		grb->out_f.color = RGB;
+		grb->out_f.y_full_size = pix_fmt->bytesperline;
+		grb->out_f.c_hor_size = pix_fmt->width;
+		grb->out_f.c_ver_size = pix_fmt->height;
+		grb->out_f.c_full_size = pix_fmt->bytesperline;
 		GRB_DBG_PRINT( "output pixelformat: RGB888\n" )
 		break;
 	default:
-		grb_info_ptr->out_f.format_dout = 0x00;
+		grb->out_f.format_dout = 0x00;
 		GRB_DBG_PRINT( "output pixelformat: unknown pixelformat!\n" )
 		return -EINVAL;
 	}
 
-	if ( (grb_info_ptr->out_f.y_hor_size > grb_info_ptr->out_f.y_full_size) ||
-		 (grb_info_ptr->out_f.c_hor_size > grb_info_ptr->out_f.c_full_size) ) {
+	if ( (grb->out_f.y_hor_size > grb->out_f.y_full_size) ||
+		 (grb->out_f.c_hor_size > grb->out_f.c_full_size) ) {
 		GRB_DBG_PRINT( "output size mismatch!\n" )
 		return -EINVAL;
 	} 
 	return 0;
 }
 
-static int setup_color( struct grb_info *grb_info_ptr, void __iomem* base_addr ) {
-	//void __iomem* base_addr = grb_info_ptr->base_addr_regs_grb;
+static int setup_color( struct grb_info *grb, void __iomem* base_addr ) {
+	//void __iomem* base_addr = grb->regs;
 
-	u32 color_in = grb_info_ptr->in_f.color,
-		color_std_in = grb_info_ptr->in_f.color_std,
-		color_out = grb_info_ptr->out_f.color,
-		color_std_out = grb_info_ptr->out_f.color_std;
+	u32 color_in = grb->in_f.color,
+		color_std_in = grb->in_f.color_std,
+		color_out = grb->out_f.color,
+		color_std_out = grb->out_f.color_std;
 
 	if( ( ( color_in != RGB ) && ( color_in != YCBCR ) ) ||
 		  ( ( color_std_in != STD_CLR_SD ) && ( color_std_in != STD_CLR_HD ) ) ||
@@ -409,64 +367,64 @@ static int setup_color( struct grb_info *grb_info_ptr, void __iomem* base_addr )
 		if( color_in == RGB ) {
 			if( color_std_out == STD_CLR_SD ) {
 				GRB_DBG_PRINT( "RGB->YCBCR,SD\n" )
-				grb_info_ptr->c_conv = &RGB_TO_YCBCR_SD;
+				grb->c_conv = &RGB_TO_YCBCR_SD;
 			} 
 			else {
 				GRB_DBG_PRINT( "RGB->YCBCR,HD\n" )
-				grb_info_ptr->c_conv = &RGB_TO_YCBCR_HD;
+				grb->c_conv = &RGB_TO_YCBCR_HD;
 			}
 		}
 		else if( color_in == YCBCR ) {
 			if( color_std_in == STD_CLR_SD ) {
 				GRB_DBG_PRINT( "YCBCR->RGB,SD\n" )
-				grb_info_ptr->c_conv = &YCBCR_TO_RGB_SD;
+				grb->c_conv = &YCBCR_TO_RGB_SD;
 			} 
 			else {
 				GRB_DBG_PRINT( "YCBCR->RGB,HD\n" )
-				grb_info_ptr->c_conv = &YCBCR_TO_RGB_HD;
+				grb->c_conv = &YCBCR_TO_RGB_HD;
 			}
 		}
 	}
 	else if( (color_in == YCBCR) && (color_out == YCBCR) ) {
 		if( (color_std_in == STD_CLR_SD) && (color_std_out == STD_CLR_HD) ) {
 			GRB_DBG_PRINT( "YCBCR SD->HD\n" )
-			grb_info_ptr->c_conv = &YCBCR_SD_TO_HD;
+			grb->c_conv = &YCBCR_SD_TO_HD;
 		}
 		else if( (color_std_in == STD_CLR_HD) & (color_std_out == STD_CLR_SD) ) {
 			GRB_DBG_PRINT( "YCBCR HD->SD\n" )
-			grb_info_ptr->c_conv = &YCBCR_HD_TO_SD;
+			grb->c_conv = &YCBCR_HD_TO_SD;
 		}
 		else {
 			GRB_DBG_PRINT( "not need color conversion\n" )
-			grb_info_ptr->c_conv = NULL;
+			grb->c_conv = NULL;
 	}
 	}
 	else { // not need color conversion
 		GRB_DBG_PRINT( "not need color conversion\n" )
-		grb_info_ptr->c_conv = NULL;
+		grb->c_conv = NULL;
 	}
 	
 	write_register( 0, base_addr, ADDR_CONV_ENABLE );
 
-	if( grb_info_ptr->c_conv ) {
-		write_register( grb_info_ptr->c_conv->coef[0][0], base_addr, ADDR_C_0_0 );
-		write_register( grb_info_ptr->c_conv->coef[0][1], base_addr, ADDR_C_0_1 );
-		write_register( grb_info_ptr->c_conv->coef[0][2], base_addr, ADDR_C_0_2 );
-		write_register( grb_info_ptr->c_conv->coef[0][3], base_addr, ADDR_C_0_3 );
+	if( grb->c_conv ) {
+		write_register( grb->c_conv->coef[0][0], base_addr, ADDR_C_0_0 );
+		write_register( grb->c_conv->coef[0][1], base_addr, ADDR_C_0_1 );
+		write_register( grb->c_conv->coef[0][2], base_addr, ADDR_C_0_2 );
+		write_register( grb->c_conv->coef[0][3], base_addr, ADDR_C_0_3 );
 
-		write_register( grb_info_ptr->c_conv->coef[1][0], base_addr, ADDR_C_1_0 );
-		write_register( grb_info_ptr->c_conv->coef[1][1], base_addr, ADDR_C_1_1 );
-		write_register( grb_info_ptr->c_conv->coef[1][2], base_addr, ADDR_C_1_2 );
-		write_register( grb_info_ptr->c_conv->coef[1][3], base_addr, ADDR_C_1_3 );
+		write_register( grb->c_conv->coef[1][0], base_addr, ADDR_C_1_0 );
+		write_register( grb->c_conv->coef[1][1], base_addr, ADDR_C_1_1 );
+		write_register( grb->c_conv->coef[1][2], base_addr, ADDR_C_1_2 );
+		write_register( grb->c_conv->coef[1][3], base_addr, ADDR_C_1_3 );
 
-		write_register( grb_info_ptr->c_conv->coef[2][0], base_addr, ADDR_C_2_0 );
-		write_register( grb_info_ptr->c_conv->coef[2][1], base_addr, ADDR_C_2_1 );
-		write_register( grb_info_ptr->c_conv->coef[2][2], base_addr, ADDR_C_2_2 );
-		write_register( grb_info_ptr->c_conv->coef[2][3], base_addr, ADDR_C_2_3 );
+		write_register( grb->c_conv->coef[2][0], base_addr, ADDR_C_2_0 );
+		write_register( grb->c_conv->coef[2][1], base_addr, ADDR_C_2_1 );
+		write_register( grb->c_conv->coef[2][2], base_addr, ADDR_C_2_2 );
+		write_register( grb->c_conv->coef[2][3], base_addr, ADDR_C_2_3 );
 
-		write_register( grb_info_ptr->c_conv->range[0], base_addr, ADDR_CH0_RANGE );
-		write_register( grb_info_ptr->c_conv->range[1], base_addr, ADDR_CH1_RANGE );
-		write_register( grb_info_ptr->c_conv->range[2], base_addr, ADDR_CH2_RANGE );
+		write_register( grb->c_conv->range[0], base_addr, ADDR_CH0_RANGE );
+		write_register( grb->c_conv->range[1], base_addr, ADDR_CH1_RANGE );
+		write_register( grb->c_conv->range[2], base_addr, ADDR_CH2_RANGE );
 		write_register( 1, base_addr, ADDR_CONV_ENABLE );
 	}
 	// print_registers( base_addr, ADDR_C_0_0, ADDR_CH2_RANGE );
@@ -486,11 +444,6 @@ static int check_and_correct_out_format( u32 format_dout, u32* c_hor_size, u32* 
 	default:			// unknown pixelformat
 		return -EINVAL;
 	}
-}
-
-static inline dma_addr_t videobuf_to_dma_contig_rcm( struct videobuf_buffer *buf ) {
-	 dma_addr_t dma_addr = videobuf_to_dma_contig( buf );
-	 return PHYS_TO_DMA( dma_addr );
 }
 
 static void setup_gamma( void __iomem* base_addr, struct grb_gamma *gam ) {
@@ -518,6 +471,9 @@ static void setup_gamma( void __iomem* base_addr, struct grb_gamma *gam ) {
 	}
 }
 
+static inline dma_addr_t buf_to_dma_contig_rcm( dma_addr_t dma_addr ) {
+	 return PHYS_TO_DMA( dma_addr );
+}
 
 static void setup_dma_addr( u32 format_dout, u32 mem_offs1, u32 mem_offs2, u32 ba_dma0, u32* ba_dma1, u32* ba_dma2 ) {
 	switch( format_dout ) {
@@ -536,254 +492,449 @@ static void setup_dma_addr( u32 format_dout, u32 mem_offs1, u32 mem_offs2, u32 b
 	}
 }
 
-int setup_registers( struct grb_info *grb_info_ptr ) {
-	void __iomem* base_addr = grb_info_ptr->base_addr_regs_grb;
-	u32 base_addr0_dma0, base_addr1_dma0, base_addr0_dma1, base_addr1_dma1, base_addr0_dma2, base_addr1_dma2;
+static void dma_addr_fill(struct grb_info *grb, dma_addr_t dma_addr, unsigned int slot) {
+	void __iomem* base_addr = grb->regs;
+	u32 base_addr_dma0, base_addr_dma1, base_addr_dma2;
+
+	base_addr_dma0 = buf_to_dma_contig_rcm( dma_addr);
+	setup_dma_addr( grb->out_f.format_dout, grb->mem_offset1, grb->mem_offset2,
+					base_addr_dma0, &base_addr_dma1, &base_addr_dma2 );
+
+	if(slot == 0) {
+		write_register( base_addr_dma0, base_addr, ADDR_DMA0_ADDR0 );	// luminance, odd
+		write_register( base_addr_dma1, base_addr, ADDR_DMA1_ADDR0 );	// color difference 1
+		write_register( base_addr_dma2, base_addr, ADDR_DMA2_ADDR0 );	// color difference 2
+	}
+	else {
+		write_register( base_addr_dma0, base_addr, ADDR_DMA0_ADDR1 );	// luminance, even
+		write_register( base_addr_dma1, base_addr, ADDR_DMA1_ADDR1 );	// color difference 1
+		write_register( base_addr_dma2, base_addr, ADDR_DMA2_ADDR1 );	// color difference 2
+	}
+}
+
+static int buffer_fill_all(struct grb_info *grb);
+
+int setup_registers( struct grb_info *grb ) {
+	void __iomem* base_addr = grb->regs;
 	u32 y_hor_size, y_ver_size, y_full_size;
 	u32 c_ver_size, c_hor_size, c_full_size;
 	u32 base_point_y, base_point_x;
 	u32 format_din;
 	u32 format_dout;
+	int ret;
+	struct v4l2_rect r = grb->cropping;
+	struct v4l2_rect cur_rect;
 
-	set_input_format( grb_info_ptr );
+	set_input_format( grb );
+	set_output_format( grb );
 
-	format_din  = grb_info_ptr->in_f.format_din;
-	format_dout = grb_info_ptr->out_f.format_dout;
+	format_din  = grb->in_f.format_din;
+	format_dout = grb->out_f.format_dout;
 	GRB_DBG_PRINT( "format_din: 0x%0x, format_dout: 0x%0x\n", format_din, format_dout )
 
-	if( grb_info_ptr->cropping.width >= RCM_GRB_MIN_SUPPORT_WIDTH && grb_info_ptr->cropping.height >= RCM_GRB_MIN_SUPPORT_HEIGHT ) {
-		y_hor_size	= grb_info_ptr->cropping.width;
-		y_ver_size	= grb_info_ptr->cropping.height;
-		c_hor_size	= grb_info_ptr->cropping.width;
-		c_ver_size	= grb_info_ptr->cropping.height;
-	}
-	else {
-		y_hor_size	= grb_info_ptr->out_f.y_hor_size;
-		y_ver_size	= grb_info_ptr->out_f.y_ver_size;
-		c_hor_size	= grb_info_ptr->out_f.c_hor_size;
-		c_ver_size	= grb_info_ptr->out_f.c_ver_size;
-	}
-	y_full_size = grb_info_ptr->out_f.y_full_size;
-	c_full_size	= grb_info_ptr->out_f.c_full_size;
-	base_point_y = grb_info_ptr->cropping.top;
-	base_point_x = grb_info_ptr->cropping.left;
+	/*Make the intersection between current size and crop request */
+	cur_rect.top = 0;
+	cur_rect.left = 0;
+	cur_rect.width = grb->format.fmt.pix.width;
+	cur_rect.height = grb->format.fmt.pix.height;
+	v4l2_rect_map_inside(&r, &cur_rect);
+	r.top  = clamp_t(s32, r.top, 0, grb->format.fmt.pix.height - r.height);
+	r.left = clamp_t(s32, r.left, 0, grb->format.fmt.pix.width - r.width);
 
-	if( check_and_correct_out_format( grb_info_ptr->out_f.format_dout, &c_hor_size, &c_full_size ) )
+	if (!(r.top == cur_rect.top && r.left == cur_rect.left &&
+	      r.width == cur_rect.width && r.height == cur_rect.height))
+	{
+		y_hor_size	= r.width;
+		y_ver_size	= r.height;
+		c_hor_size	= r.width;
+		c_ver_size	= r.height;
+		GRB_DBG_PRINT("crop %ux%u@(%u,%u) from %ux%u\n",
+			r.width, r.height, r.left, r.top, cur_rect.width, cur_rect.height);
+	}
+	else 
+	{
+		y_hor_size	= grb->out_f.y_hor_size;
+		y_ver_size	= grb->out_f.y_ver_size;
+		c_hor_size	= grb->out_f.c_hor_size;
+		c_ver_size	= grb->out_f.c_ver_size;
+	}
+	y_full_size = grb->out_f.y_full_size;
+	c_full_size	= grb->out_f.c_full_size;
+	base_point_y = r.top;
+	base_point_x = r.left;
+
+	if( check_and_correct_out_format( grb->out_f.format_dout, &c_hor_size, &c_full_size ) )
 		return -EINVAL;
 
-	grb_info_ptr->mem_offset1 = y_full_size*y_ver_size;											// plane for color component 1
-	grb_info_ptr->mem_offset2 = grb_info_ptr->mem_offset1 + c_full_size*c_ver_size;				// plane for color component 2
+	grb->mem_offset1 = y_full_size*y_ver_size;									// plane for color component 1
+	grb->mem_offset2 = grb->mem_offset1 + c_full_size*c_ver_size;				// plane for color component 2
 	
 	GRB_DBG_PRINT( "y_hor_size=%d,y_ver_size=%d,c_hor_size=%d,c_ver_size=%d,y_full_size=%d,c_full_size=%d,mem_offset1=%d,mem_offset2=%d,alpha=%d\n",
 			 y_hor_size, y_ver_size, c_hor_size, c_ver_size, y_full_size, c_full_size,
-			 grb_info_ptr->mem_offset1, grb_info_ptr->mem_offset2, grb_info_ptr->param.alpha )
-	print_videobuf_queue_param( &grb_info_ptr->videobuf_queue_grb, 2 ); 						// print vaddr,dma_handle,size for each buffer
+			 grb->mem_offset1, grb->mem_offset2, grb->param.alpha )
 
-	base_addr0_dma0 = videobuf_to_dma_contig_rcm( grb_info_ptr->videobuf_queue_grb.bufs[0] );	// just return dma address
-	//base_addr0_dma1 = base_addr0_dma0 + grb_info_ptr->mem_offset1;
-	//base_addr0_dma2 = base_addr0_dma0 + grb_info_ptr->mem_offset2;
-	setup_dma_addr( grb_info_ptr->out_f.format_dout, grb_info_ptr->mem_offset1, grb_info_ptr->mem_offset2,
-					base_addr0_dma0, &base_addr0_dma1, &base_addr0_dma2 );
-
-	base_addr1_dma0 = videobuf_to_dma_contig_rcm( grb_info_ptr->videobuf_queue_grb.bufs[1] );
-	//base_addr1_dma1 = base_addr1_dma0 + grb_info_ptr->mem_offset1;
-	//base_addr1_dma2 = base_addr1_dma0 + grb_info_ptr->mem_offset2;
-	setup_dma_addr( grb_info_ptr->out_f.format_dout, grb_info_ptr->mem_offset1, grb_info_ptr->mem_offset2,
-					base_addr1_dma0, &base_addr1_dma1, &base_addr1_dma2 );
-
-	grb_info_ptr->frame_count = 0;
-	grb_info_ptr->next_buf_num = 2;
-
-	GRB_DBG_PRINT( "base_addr0_dma0=%08x,base_addr1_dma0=%08x,base_addr0_dma1=%08x,base_addr1_dma1=%08x,base_addr0_dma2=%08x,base_addr1_dma2=%08x\n",
-			 base_addr0_dma0, base_addr1_dma0, base_addr0_dma1, base_addr1_dma1, base_addr0_dma2, base_addr1_dma2 )
+	grb->sequence = 0;
 
 	reset_grab( base_addr );
 	write_register( 1, base_addr, ADDR_BASE_SW_ENA );											// enable switching base addresses
-	write_register( base_addr0_dma0, base_addr, ADDR_DMA0_ADDR0 );								// luminance,odd
-	write_register( base_addr0_dma1, base_addr, ADDR_DMA1_ADDR0 );								// color difference 1
-	write_register( base_addr0_dma2, base_addr, ADDR_DMA2_ADDR0 );								// color difference 2
-	write_register( base_addr1_dma0, base_addr, ADDR_DMA0_ADDR1 );								// luminance
-	write_register( base_addr1_dma1, base_addr, ADDR_DMA1_ADDR1 );								// color difference 1
-	write_register( base_addr1_dma2, base_addr, ADDR_DMA2_ADDR1 );								// color difference 2
+
+	ret = buffer_fill_all(grb);
+	if (ret) {
+		return ret;
+	}
+
 	write_register( U16x2_TO_U32( y_ver_size, y_hor_size ), base_addr, ADDR_Y_SIZE );			// 27:16-height,11:0-width for luminance
 	write_register( U16x2_TO_U32( c_ver_size, c_hor_size ), base_addr, ADDR_C_SIZE );			// 27:16-height,11:0-width color difference
 	write_register( U16x2_TO_U32( c_full_size, y_full_size ), base_addr, ADDR_FULL_LINE_SIZE );	// 27:16-height,11:0-width full string
 	write_register( U16x2_TO_U32( base_point_y, base_point_x ), base_addr, ADDR_BASE_POINT );	// 27:16-base point vert coord,11:0-ase point hor coord
-	write_register( grb_info_ptr->param.alpha, base_addr, ADDR_TRANSPARENCY );
+	write_register( grb->param.alpha, base_addr, ADDR_TRANSPARENCY );
+
 // ADDR_MODE:
 // 4: 0-hsync, vsync, field and data_enable),1-EAV and SAV
 // 3: 0-not duplication,1-duplication (SDTV)
 // 2,1: 1–dv0;2–dv0,dv1;3–dv0,dv1,dv2
 // 0: input format: 0 – YCbCr,1 – RGB
 	write_register( format_din , base_addr, ADDR_MODE );
+
 // ADDR_LOCATION_DATA:
 // бит 3:  YCbCr only: 0 – YCbCr 4:2:2; 1 – YCbCr 4:4:4
 // биты 2,1: output plane count: 1–ARGB8888; 2–YCbCr 4:2:2; 3–YCbCr 4:4:4,YCbCr 4:2:2 and RGB888
 // бит 0: output format 0 – YCbCr; 1 – RGB
 	write_register( format_dout , base_addr, ADDR_LOCATION_DATA );
-	setup_gamma( base_addr, &grb_info_ptr->gam );
-	setup_color( grb_info_ptr, base_addr );
+	setup_gamma( base_addr, &grb->gam );
+	setup_color( grb, base_addr );
 	set_register( INT_BIT_END_WRITE, base_addr, ADDR_INT_MASK  );
-	write_register( 1 , base_addr, ADDR_ENABLE );
+	
+	capture_start(grb);
 
 	return 0;
 }
 
-static int buf_setup_grb ( struct videobuf_queue *q, unsigned int *count, unsigned int *size ) {
-	struct grb_info *grb_info_ptr = q->priv_data;
+/* ------------------------------------------------------------------
+	Videobuf operations
+   ------------------------------------------------------------------*/
+static int queue_setup(struct vb2_queue *vq,
+				unsigned int *nbuffers, unsigned int *nplanes,
+				unsigned int sizes[], struct device *alloc_devs[])
+{
+	struct grb_info *grb = vb2_get_drv_priv(vq);
+	unsigned long size;
 	int max_buff;
-	*size = grb_info_ptr->format.fmt.pix.sizeimage;
-	GRB_DBG_PRINT( "buf setup entry: buff_length=%u,size=%u,count=%u\n", grb_info_ptr->buff_length, *size, *count )
-	if( *size == 0 )
+
+	GRB_DBG_PRINT_PROC_CALL
+
+	size = grb->format.fmt.pix.sizeimage;
+	GRB_DBG_PRINT( "%s entry: buff_length=%u,size=%lu,count=%u\n", __func__, grb->buff_length, size, *nbuffers )
+
+	if( size == 0 )
 		return -EINVAL;
-	max_buff = grb_info_ptr->buff_length / *size;
-	if( *count < 2 )
-		*count = 2;
-	else if( *count > 32 )
-		*count = 32;
-	if( *count > max_buff )
-		*count = max_buff;
-	grb_info_ptr->reqv_buf_cnt = *count;	// save available buffers count
-	//print_videobuf_queue_param( q, 4 );
-	GRB_DBG_PRINT( "buf setup return: buff_length=%u,size=%u,count=%u\n", grb_info_ptr->buff_length, *size, *count )
+
+	max_buff = grb->buff_length / size;
+	if( *nbuffers < 2 )
+		*nbuffers = 2;
+	else if( *nbuffers > VIDEO_MAX_FRAME )
+		*nbuffers = VIDEO_MAX_FRAME;
+	if( *nbuffers > max_buff )
+		*nbuffers = max_buff;
+	grb->reqv_buf_cnt = *nbuffers;	// save available buffers count
+
+	/* Make sure the image size is large enough. */
+	if (*nplanes)
+		return sizes[0] < size ? -EINVAL : 0;
+
+	*nplanes = 1;
+	sizes[0] = size;
+
+	GRB_DBG_PRINT( "%s return: buff_length=%u,size=%lu,count=%u\n", __func__, grb->buff_length, size, *nbuffers )
 	return 0;
 }
 
-static int buf_prepare_grb ( struct videobuf_queue *q, struct videobuf_buffer *vb, enum v4l2_field field ) {
-	struct grb_info *grb_info_ptr = q->priv_data;
-	GRB_DBG_PRINT_PROC_CALL
-	vb->size = grb_info_ptr->format.fmt.pix.sizeimage;
-	vb->width = grb_info_ptr->format.fmt.pix.bytesperline;
-	vb->height = grb_info_ptr->format.fmt.pix.height;
-	vb->field = field;
+static int buffer_init(struct vb2_buffer *vb)
+{
+	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
+	struct frame_buffer *buf = container_of(vbuf, struct frame_buffer, vb);
 
-	if( vb->state == VIDEOBUF_NEEDS_INIT ) {
-		int ret = videobuf_iolock( q, vb, NULL );
-		if( ret ) {
-			GRB_DBG_PRINT( "videobuf_iolock failed (%d)\n", ret )
+	GRB_DBG_PRINT_PROC_CALL
+
+	INIT_LIST_HEAD(&buf->list);
+
+	return 0;
+}
+
+static int buffer_prepare(struct vb2_buffer *vb)
+{
+	struct grb_info *grb = vb2_get_drv_priv(vb->vb2_queue);
+	unsigned long size;
+
+	GRB_DBG_PRINT_PROC_CALL
+
+	size = grb->format.fmt.pix.sizeimage;
+
+	if (vb2_plane_size(vb, 0) < size) {
+		dev_err(grb->dev, "%s data will not fit into plane (%lu < %lu)\n",
+				__func__, vb2_plane_size(vb, 0), size);
+		return -EINVAL;
+	}
+
+	vb2_set_plane_payload(vb, 0, size);
+	return 0;
+}
+
+static void buffer_queue(struct vb2_buffer *vb)
+{
+	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
+	struct grb_info *grb = vb2_get_drv_priv(vb->vb2_queue);
+	struct frame_buffer *buf = container_of(vbuf, struct frame_buffer, vb);
+	unsigned long flags = 0;
+
+	GRB_DBG_PRINT_PROC_CALL
+
+	spin_lock_irqsave(&grb->irq_lock, flags);
+	list_add_tail(&buf->list, &grb->buf_list);
+	spin_unlock_irqrestore(&grb->irq_lock, flags);
+}
+
+static int setup_scratch_buffer(struct grb_info *grb, unsigned int slot)
+{
+
+	dev_dbg(grb->dev,
+		"No more available buffer, need use the scratch buffer!\n");
+
+	grb->current_buf[slot] = NULL;
+	return 0;
+}
+
+static int buffer_fill_slot(struct grb_info *grb, unsigned int slot)
+{
+	struct frame_buffer *c_buf;
+	struct vb2_v4l2_buffer *v_buf;
+	dma_addr_t buf_addr;
+
+	/*
+	 * We should never end up in a situation where we overwrite an
+	 * already filled slot.
+	 */
+	if (WARN_ON(grb->current_buf[slot]))
+		return -EINVAL;
+
+	if (list_empty(&grb->buf_list))
+		return setup_scratch_buffer(grb, slot);
+
+	c_buf = list_first_entry(&grb->buf_list, struct frame_buffer, list);
+	list_del_init(&c_buf->list);
+
+	v_buf = &c_buf->vb;
+	grb->current_buf[slot] = v_buf;
+
+	buf_addr = vb2_dma_contig_plane_dma_addr(&v_buf->vb2_buf, 0);
+	dma_addr_fill(grb, buf_addr, slot);
+
+	return 0;
+}
+
+static int buffer_fill_all(struct grb_info *grb)
+{
+	unsigned int slot;
+	int ret;
+
+	for (slot = 0; slot < RCM_GRB_MAX_FRAME; slot++) {
+		ret = buffer_fill_slot(grb, slot);
+		if (ret) {
+			dev_err(grb->dev, "Error buffer fill slot %d\n", slot);
 			return ret;
 		}
 	}
-	vb->state = VIDEOBUF_PREPARED;
-	//print_videobuf_queue_param( q, 4 );
 	return 0;
 }
 
-static void buf_queue_grb ( struct videobuf_queue *q, struct videobuf_buffer *vb ) {
-	struct grb_info* grb_info_ptr = q->priv_data;
-	GRB_DBG_PRINT_PROC_CALL
-	list_add_tail( &vb->queue, &grb_info_ptr->buffer_queue );	// Note that videobuf holds the lock when it calls us, so we need not (indeed, cannot) take it here
-	vb->state = VIDEOBUF_QUEUED;
-	//print_videobuf_queue_param( q, 4 );
-}
-
-static void buf_release_grb ( struct videobuf_queue *q, struct videobuf_buffer *vb ) {
-	struct grb_info* grb_info_ptr = q->priv_data;
-	unsigned long flags;
-	GRB_DBG_PRINT_PROC_CALL
-	spin_lock_irqsave( &grb_info_ptr->irq_lock, flags );
-	INIT_LIST_HEAD( &grb_info_ptr->buffer_queue );				// We need to flush the buffer from the dma queue since hey are de-allocated
-	spin_unlock_irqrestore( &grb_info_ptr->irq_lock, flags );
-	videobuf_dma_contig_free( q, vb );
-	vb->state = VIDEOBUF_NEEDS_INIT;
-	//print_videobuf_queue_param( q, 4 );
-}
-
-static const struct videobuf_queue_ops videobuf_queue_ops_grb =
+static void buffer_mark_done(struct grb_info *grb, unsigned int slot, unsigned int sequence)
 {
-	.buf_setup   = buf_setup_grb,	// Is called early in the I/O process, when streaming is being initiated, its purpose is to tell videobuf about the I/O stream.
-									// The count parameter will be a suggested number of buffers to use; the driver should check it for rationality and adjust it if need be.
-									// As a practical rule, a minimum of two buffers are needed for proper streaming, and there is usually a maximum (which cannot exceed 32) which makes sense for each device.
-									// The size parameter should be set to the expected (maximum) size for each frame of data.
-	.buf_prepare = buf_prepare_grb,	// Each buffer (in the form of a struct videobuf_buffer pointer) will be passed to buf_prepare().
-									// which should set the buffer’s size, width, height, and field fields properly.
-	.buf_queue   = buf_queue_grb,	// When a buffer is queued for I/O, it is passed to buf_queue(), which should put it onto the driver’s list of available buffers and set its state to VIDEOBUF_QUEUED.
-									// Note also that videobuf may wait on the first buffer in the queue; placing other buffers in front of it could again gum up the works.
-									// So use list_add_tail() to enqueue buffers.
-	.buf_release = buf_release_grb,	// Finally, buf_release() is called when a buffer is no longer intended to be used.
-};									// The driver should ensure that there is no I/O active on the buffer, then pass it to the appropriate free routine(s):
+	struct vb2_v4l2_buffer *v_buf;
 
-static int drv_vidioc_auto_detect( struct grb_info *grb_info_ptr, void *arg );
+	if (!grb->current_buf[slot]) {
+		dev_dbg(grb->dev, "Scratch buffer was used, ignoring..\n");
+		return;
+	}
 
-static int device_open( struct file *file_ptr ) {
-	struct grb_info *grb_info_ptr = video_drvdata( file_ptr) ;
-	struct v4l2_subdev *sd = grb_info_ptr->entity.subdev;
+	v_buf = grb->current_buf[slot];
+	v_buf->field = grb->format.fmt.pix.field;
+	v_buf->sequence = sequence;
+	v_buf->vb2_buf.timestamp = ktime_get_ns();
+	vb2_buffer_done(&v_buf->vb2_buf, VB2_BUF_STATE_DONE);
+
+	grb->current_buf[slot] = NULL;
+}
+
+static int buffer_flip(struct grb_info *grb, unsigned int sequence)
+{
+	unsigned int next;
+	u32 reg = read_register( grb->regs, ADDR_GRB_STATUS);
+
+	/* Our next buffer is not the current buffer */
+	next = !(reg & BIT_ACTIVE_FRAME);
+
+	/* Report the previous buffer as done */
+	buffer_mark_done(grb, next, sequence);
+
+	GRB_DBG_PRINT( "buffer_flip: sequence = %d; switch_page = %d\n", sequence , next )
+
+	/* Put a new buffer in there */
+	return buffer_fill_slot(grb, next);
+}
+
+static void return_all_buffers(struct grb_info *grb, enum vb2_buffer_state state)
+{
+	struct frame_buffer *buf, *node;
+	unsigned int slot;
+
+	list_for_each_entry_safe(buf, node, &grb->buf_list, list) {
+		vb2_buffer_done(&buf->vb.vb2_buf, state);
+		list_del(&buf->list);
+	}
+
+	for (slot = 0; slot < RCM_GRB_MAX_FRAME; slot++) {
+		struct vb2_v4l2_buffer *v_buf = grb->current_buf[slot];
+
+		if (!v_buf)
+			continue;
+
+		vb2_buffer_done(&v_buf->vb2_buf, state);
+		grb->current_buf[slot] = NULL;
+	}
+}
+
+static int start_streaming(struct vb2_queue *vq, unsigned int count)
+{
+	struct grb_info *grb = vb2_get_drv_priv(vq);
 	int ret;
 
-	void __iomem* base_addr = grb_info_ptr->base_addr_regs_grb;
+	GRB_DBG_PRINT_PROC_CALL
 
-	dev_dbg( grb_info_ptr->dev, "Open video4linux2 device. Name: %s, base: %x \n" ,
-			  grb_info_ptr->video_dev.name, (u32)grb_info_ptr->phys_addr_regs_grb );
+	dev_dbg(grb->dev, "Starting capture\n");
+
+	ret = media_pipeline_start(&grb->video_dev.entity, &grb->video_dev.pipe);
+	if (ret < 0)
+		goto err_start_stream;
 
 
-//	ret = v4l2_fh_open(file_ptr);
-//	if (ret < 0) {
-//		dev_err(grb_info_ptr->dev, "Error! v4l2_fh_open fail.\n");
-//		return ret;
-//	}
+	/* Enable stream on the sub device */
+	ret = v4l2_subdev_call(grb->entity.subdev, video, s_stream, 1);
+	if (ret && ret != -ENOIOCTLCMD) {
+		dev_err(grb->dev, "stream on failed in subdev\n");
+		goto err_disable_pipeline;
+	}
 
-//	if (!v4l2_fh_is_singular_file(file_ptr)) {
-//		dev_err(grb_info_ptr->dev, "Error! v4l2_fh_file are not singular.\n");
-//		goto fh_rel;
-//	}
+	ret = v4l2_ctrl_handler_setup(&grb->hdl);
+	if( ret < 0 ) {
+		dev_err(grb->dev,  "v4l2_ctrl_handler_setup failed \n");
+		goto err_stop_subdev;
+	}
+
+	ret = setup_registers( grb );
+	if( ret < 0 ) {
+		dev_err(grb->dev,  "set_register failed \n");
+		goto err_disable_device;
+	}
+
+	return 0;
+
+err_disable_device:
+	capture_stop(grb);
+
+err_stop_subdev:
+	v4l2_subdev_call(grb->entity.subdev, video, s_stream, 0);
+
+err_disable_pipeline:
+	media_pipeline_stop(&grb->video_dev.entity);
+
+err_start_stream:
+	spin_lock_irq(&grb->irq_lock);
+	return_all_buffers(grb, VB2_BUF_STATE_QUEUED);
+	spin_unlock_irq(&grb->irq_lock);
+
+	return ret;
+}
+
+/* abort streaming and wait for last buffer */
+static void stop_streaming(struct vb2_queue *vq)
+{
+	struct grb_info *grb = vb2_get_drv_priv(vq);
+
+	GRB_DBG_PRINT_PROC_CALL
+
+	dev_dbg(grb->dev, "Stopping capture\n");
+
+	/* Disable stream on the sub device */
+	v4l2_subdev_call(grb->entity.subdev, video, s_stream, 0);
+	capture_stop(grb);
+
+	/* Release all active buffers */
+	spin_lock_irq(&grb->irq_lock);
+	return_all_buffers(grb, VB2_BUF_STATE_ERROR);
+	spin_unlock_irq(&grb->irq_lock);
+
+	reset_grab( grb->regs );
+}
+
+static const struct vb2_ops grb_video_qops = {
+	.queue_setup		= queue_setup,
+	.buf_init			= buffer_init,
+	.buf_prepare		= buffer_prepare,
+	.buf_queue			= buffer_queue,
+	.start_streaming	= start_streaming,
+	.stop_streaming		= stop_streaming,
+	.wait_prepare		= vb2_ops_wait_prepare,
+	.wait_finish		= vb2_ops_wait_finish,
+};
+
+static int drv_vidioc_auto_detect( struct grb_info *grb, void *arg );
+
+static int device_open( struct file *file_ptr ) {
+	struct grb_info *grb = video_drvdata( file_ptr) ;
+	struct v4l2_subdev *sd = grb->entity.subdev;
+	int ret;
+
+	dev_dbg( grb->dev, "Open video4linux2 device. Name: %s, base: %x \n" ,
+			  grb->video_dev.name, (u32)grb->phys_addr_regs );
+
+	ret = mutex_lock_interruptible(&grb->lock);
+	if (ret)
+		return ret;
+
+	ret = v4l2_fh_open(file_ptr);
+	if (ret < 0) {
+		dev_err(grb->dev, "Error! v4l2_fh_open fail.\n");
+		goto unlock;
+	}
 
 	ret = v4l2_subdev_call(sd, core, s_power, 1);
 	if (ret < 0 && ret != -ENOIOCTLCMD){
-		dev_err(grb_info_ptr->dev, "Error power up subdev\n");
+		dev_err(grb->dev, "Error power up subdev\n");
 		goto fh_rel;
 	}
 
+//	drv_vidioc_auto_detect( grb, NULL );
 
-	drv_vidioc_auto_detect( grb_info_ptr, NULL );
-
-	videobuf_queue_dma_contig_init( &grb_info_ptr->videobuf_queue_grb,
-									&videobuf_queue_ops_grb,
-									grb_info_ptr->dev,
-									&grb_info_ptr->irq_lock,
-									V4L2_BUF_TYPE_VIDEO_CAPTURE,
-									V4L2_FIELD_NONE,
-									sizeof(struct videobuf_buffer),
-									grb_info_ptr,
-									NULL );
-
-	dump_all_regs("Dump regs after device_open", base_addr);
-
-	return 0;
+//	v4l2_subdev_call(sd, core, s_power, 0);
 
 fh_rel:
-//	v4l2_fh_release(file_ptr);
+	if (ret)
+		v4l2_fh_release(file_ptr);
+unlock:
+	mutex_unlock(&grb->lock);
 	return ret;
 }
 
 static int device_release(struct file *file_ptr ) {
 	struct video_device *video_dev = video_devdata( file_ptr );
-	struct grb_info *grb_info_ptr = video_drvdata( file_ptr );
-	int err;
-	struct v4l2_subdev *sd = grb_info_ptr->entity.subdev;
-//	bool fh_singular;
+	struct grb_info *grb = video_drvdata( file_ptr );
 
-	dev_dbg( grb_info_ptr->dev, "Close video4linux2 device. Name: %s \n" , video_dev->name );
+	dev_dbg( grb->dev, "Close video4linux2 device. Name: %s \n" , video_dev->name );
 
-//	fh_singular = v4l2_fh_is_singular_file(file_ptr);
-
-	//_vb2_fop_release(file, NULL);
-//	v4l2_fh_release(file_ptr);
-
-//	if (fh_singular)
-		v4l2_subdev_call(sd, core, s_power, 0);
-
-	videobuf_stop(  &grb_info_ptr->videobuf_queue_grb );			// The call to videobuf_stop() terminates any I/O in progress-though it is still up to the driver to stop the capture engine.
-	err = videobuf_mmap_free( &grb_info_ptr->videobuf_queue_grb );	// The call to videobuf_mmap_free() will ensure that all buffers have been unmapped.
-	if( err )														// If so, they will all be passed to the buf_release() callback. If buffers remain mapped, videobuf_mmap_free() returns an error code instead.
-		dev_err( grb_info_ptr->dev, "videobuf_mmap_free failed,err=%d\n", err );
+	mutex_lock(&grb->lock);
+	v4l2_fh_release(file_ptr);
+	mutex_unlock(&grb->lock);
 	return 0;
-}
-
-static int device_mmap( struct file *file_ptr, struct vm_area_struct *vma ) {
-	struct grb_info *grb_info_ptr = video_drvdata( file_ptr );
-	int ret = videobuf_mmap_mapper( &grb_info_ptr->videobuf_queue_grb, vma );
-	GRB_DBG_PRINT( "device_mmap return: vm_start=%lx,vm_end=%lx\n", vma->vm_start, vma->vm_end )
-	return ret;
 }
 
 static void video_dev_release(struct video_device *video_dev ) {
@@ -795,54 +946,33 @@ static struct v4l2_file_operations fops =
 	.open           = device_open,
 	.release        = device_release,
 	.unlocked_ioctl = video_ioctl2,
-	.mmap           = device_mmap
+	.mmap			= vb2_fop_mmap,
+	.poll			= vb2_fop_poll,
+	.read			= vb2_fop_read,
 };
 
 static int vidioc_querycap_grb ( struct file* file_ptr, void* fh, struct v4l2_capability* v4l2_cap_ptr )
 {
-	struct grb_info *grb_info_ptr = video_drvdata( file_ptr );
+	struct grb_info *grb = video_drvdata( file_ptr );
 	char bus_info[32];
 
 	strlcpy( v4l2_cap_ptr->driver, RCM_GRB_DRIVER_NAME, sizeof(v4l2_cap_ptr->driver) );
 	strlcpy( v4l2_cap_ptr->card, RCM_GRB_DEVICE_NAME, sizeof(v4l2_cap_ptr->card) );
-	snprintf( bus_info, sizeof(bus_info), "platform:vdu-grabber@0x%x", (u32)virt_to_phys(grb_info_ptr->base_addr_regs_grb) );
+	snprintf( bus_info, sizeof(bus_info), "platform:vdu-grabber@0x%x", (u32)virt_to_phys(grb->regs) );
 	strlcpy( v4l2_cap_ptr->bus_info, bus_info, sizeof(v4l2_cap_ptr->bus_info) ) ;
 //	v4l2_cap_ptr->version = RCM_GRB_DRIVER_VERSION;
-	v4l2_cap_ptr->device_caps = grb_info_ptr->video_dev.device_caps;
+	v4l2_cap_ptr->device_caps = grb->video_dev.device_caps;
 	v4l2_cap_ptr->capabilities = v4l2_cap_ptr->device_caps | V4L2_CAP_DEVICE_CAPS;
 	v4l2_cap_ptr->reserved[0] = v4l2_cap_ptr->reserved[1] = v4l2_cap_ptr->reserved[2] = 0;
 	//GRB_DBG_PRINT( "vidioc_querycap_grb return: device_caps=%x,capabilities=%x\n", v4l2_cap_ptr->device_caps, v4l2_cap_ptr->capabilities )
 	return 0;
 }
 
-/*
-static int vidioc_cropcap_grb ( struct file *file_ptr, void *fh, struct v4l2_cropcap *v4l2_cropcap_ptr ) {
-	struct grb_info *grb_info_ptr = video_drvdata(file_ptr);
-	return 0;
-}
-
-static int vidioc_g_crop_grb ( struct file *file_ptr, void *fh, struct v4l2_crop *v4l2_crop_ptr ) {
-	struct grb_info *grb_info_ptr = video_drvdata(file_ptr);
-	if (v4l2_crop_ptr->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
-		return -EINVAL;
-	v4l2_crop_ptr->c = grb_info_ptr->cropping;
-	return 0;
-}
-
-static int vidioc_s_crop_grb ( struct file *file_ptr,void *fh, const struct v4l2_crop *v4l2_crop_ptr ) {
-	struct grb_info *grb_info_ptr = video_drvdata(file_ptr);
-	if (v4l2_crop_ptr->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
-		return -EINVAL;
-	grb_info_ptr->cropping = v4l2_crop_ptr->c;
-	return 0;
-}
-*/
-
-static int vidioc_fmt( struct grb_info *grb_info_ptr, struct v4l2_format *f ) {
+static int vidioc_fmt( struct grb_info *grb, struct v4l2_format *f ) {
 	if( f->type == V4L2_BUF_TYPE_VIDEO_CAPTURE ) {
-		//f->fmt.pix.width  = grb_info_ptr->recognize_format.width;
-		//f->fmt.pix.height = grb_info_ptr->recognize_format.height;
-		//f->fmt.pix.field  = grb_info_ptr->recognize_format.field;
+		//f->fmt.pix.width  = grb->recognize_format.width;
+		//f->fmt.pix.height = grb->recognize_format.height;
+		//f->fmt.pix.field  = grb->recognize_format.field;
 		//print_four_cc( "vidioc_fmt entry: ", f->fmt.pix.pixelformat );
 		switch( f->fmt.pix.pixelformat  ) {
 		default:
@@ -913,7 +1043,7 @@ static int vidioc_enum_fmt_vid_cap_grb( struct file *file, void *fh, struct v4l2
 	return 0;
 }
 
-static int grb_try_fmt(struct grb_info *grb_info_ptr, struct v4l2_format *f, u32 *code)
+static int grb_try_fmt(struct grb_info *grb, struct v4l2_format *f, u32 *code)
 {
 	const struct grb_pix_map *vpix;
 	struct v4l2_pix_format *pixfmt = &f->fmt.pix;
@@ -928,26 +1058,48 @@ static int grb_try_fmt(struct grb_info *grb_info_ptr, struct v4l2_format *f, u32
 	vpix = grb_pix_map_by_pixelformat(pixfmt->pixelformat);
 	if (!vpix) {
 		pixfmt->pixelformat = fmt_default.pixelformat;
+		GRB_DBG_PRINT("%s: pixelformat not found. use default\n", __func__);
 	}
 
-	if (pixfmt->field == V4L2_FIELD_ANY)
+	if (pixfmt->field == V4L2_FIELD_ANY) {
 		pixfmt->field = fmt_default.field;
+		GRB_DBG_PRINT("%s: use default field\n", __func__);
+	}
 
 	/* Limit to hardware capabilities */
-	if (pixfmt->width > RCM_GRB_MAX_SUPPORT_WIDTH)
+	if (pixfmt->width > RCM_GRB_MAX_SUPPORT_WIDTH) {
 		pixfmt->width = RCM_GRB_MAX_SUPPORT_WIDTH;
-	if (pixfmt->height > RCM_GRB_MAX_SUPPORT_HEIGHT)
+		GRB_DBG_PRINT("%s: set RCM_GRB_MAX_SUPPORT_WIDTH\n", __func__);
+	}
+	if (pixfmt->height > RCM_GRB_MAX_SUPPORT_HEIGHT) {
 		pixfmt->height = RCM_GRB_MAX_SUPPORT_HEIGHT;
+		GRB_DBG_PRINT("%s: set RCM_GRB_MAX_SUPPORT_HEIGHT\n", __func__);
+	}
 	
-	if (pixfmt->width < RCM_GRB_MIN_SUPPORT_WIDTH)
+	if (pixfmt->width < RCM_GRB_MIN_SUPPORT_WIDTH) {
 		pixfmt->width = fmt_default.width;
-	if (pixfmt->height < RCM_GRB_MIN_SUPPORT_HEIGHT)
+		GRB_DBG_PRINT("%s: set fmt_default.width (%d)\n", __func__, pixfmt->width);
+	}
+	if (pixfmt->height < RCM_GRB_MIN_SUPPORT_HEIGHT) {
 		pixfmt->height = fmt_default.height;
+		GRB_DBG_PRINT("%s: set fmt_default.height (%d)\n", __func__, pixfmt->height);
+	}
+	GRB_DBG_PRINT("%s: cur size %dX%d\n", __func__, pixfmt->width, pixfmt->height);
 
-//	sd_fmt.pad = grb_info_ptr->src_pad;
+
+//	sd_fmt.pad = grb->src_pad;
 //	sd_fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
-//	v4l2_subdev_call(grb_info_ptr->src_subdev, pad, get_fmt, NULL, &sd_fmt);
+//	v4l2_subdev_call(grb->src_subdev, pad, get_fmt, NULL, &sd_fmt);
 //	v4l2_fill_pix_format(pixfmt, &sd_fmt.format);
+
+	pixfmt->field = V4L2_FIELD_NONE;
+	if((pixfmt->colorspace == V4L2_COLORSPACE_DEFAULT) || 
+	   (pixfmt->colorspace > V4L2_COLORSPACE_DCI_P3)) {
+		pixfmt->colorspace = V4L2_COLORSPACE_SRGB;
+	}
+	pixfmt->ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
+	pixfmt->quantization = V4L2_QUANTIZATION_DEFAULT;
+	pixfmt->xfer_func = V4L2_XFER_FUNC_DEFAULT;
 
 	switch( pixfmt->pixelformat  ) {
 	default:
@@ -972,169 +1124,43 @@ static int grb_try_fmt(struct grb_info *grb_info_ptr, struct v4l2_format *f, u32
 		break;
 	}
 
-	pixfmt->field = V4L2_FIELD_NONE;
+	GRB_DBG_PRINT("%s: cur bytesperline %d, sizeimage %d, field %d\n", __func__, pixfmt->bytesperline, pixfmt->sizeimage, pixfmt->field);
 
 	return 0;
 }
 
 static int vidioc_g_fmt_vid_cap_grb ( struct file *file_ptr, void *fh, struct v4l2_format *f ) {
 	int ret = 0;
-	struct grb_info *grb_info_ptr = video_drvdata(file_ptr);
-	ret = vidioc_fmt( grb_info_ptr, f );
-	*f = grb_info_ptr->format;
-	print_v4l2_format( "Vidioc_g_fmt_vid_cap_grb return", (int)grb_info_ptr->phys_addr_regs_grb, f );
+	struct grb_info *grb = video_drvdata(file_ptr);
+	ret = vidioc_fmt( grb, f );
+	*f = grb->format;
+	print_v4l2_format( "Vidioc_g_fmt_vid_cap_grb return", (int)grb->phys_addr_regs, f );
 	return ret;
 }
 
 static int vidioc_try_fmt_vid_cap_grb( struct file *file_ptr, void *fh, struct v4l2_format *f ) {
 	int ret;
-	struct grb_info *grb_info_ptr = video_drvdata( file_ptr );
-//	ret = vidioc_fmt( grb_info_ptr, f ) || set_output_format( grb_info_ptr, f );
-	ret = grb_try_fmt(grb_info_ptr, f, NULL);
-	print_v4l2_format( "Vidioc_try_fmt_vid_cap_grb return", (int)grb_info_ptr->phys_addr_regs_grb, f );
+	struct grb_info *grb = video_drvdata( file_ptr );
+	ret = grb_try_fmt(grb, f, NULL);
+	print_v4l2_format( "Vidioc_try_fmt_vid_cap_grb return", (int)grb->phys_addr_regs, f );
 	return ret;
 }
 
 static int vidioc_s_fmt_vid_cap_grb ( struct file *file_ptr, void *fh, struct v4l2_format *f ) {
 	int ret;
-	struct grb_info *grb_info_ptr = video_drvdata( file_ptr );
+	struct grb_info *grb = video_drvdata( file_ptr );
 
-	ret = grb_try_fmt(grb_info_ptr, f, NULL);
+	ret = grb_try_fmt(grb, f, NULL);
 	if(ret)
 		return ret;
 
-	grb_info_ptr->format = *f;
+	grb->format = *f;
 
-	ret = set_output_format( grb_info_ptr, f );	//negotiate the format of data (typically image format) exchanged between driver and application
-	print_v4l2_format( "Vidioc_s_fmt_vid_cap_grb return", (int)grb_info_ptr->phys_addr_regs_grb, f );
+	ret = set_output_format(grb);	//negotiate the format of data (typically image format) exchanged between driver and application
+	print_v4l2_format( "Vidioc_s_fmt_vid_cap_grb return", (int)grb->phys_addr_regs, f );
 	return ret;
 }
 
-static int vidioc_reqbufs_grb ( struct file *file_ptr, void *fh, struct v4l2_requestbuffers *req ) {
-	struct grb_info *grb_info_ptr = video_drvdata( file_ptr );
-	unsigned long flags;
-	int ret;
-	GRB_DBG_PRINT_PROC_CALL
-
-	if (req->type != V4L2_BUF_TYPE_VIDEO_CAPTURE ||
-		req->memory != V4L2_MEMORY_MMAP) {
-		GRB_DBG_PRINT( "Invalid buffer type or memory\n" )
-		return -EINVAL;
-	}
-
-	spin_lock_irqsave( &grb_info_ptr->irq_lock, flags );
-	INIT_LIST_HEAD( &grb_info_ptr->buffer_queue );
-	spin_unlock_irqrestore( &grb_info_ptr->irq_lock, flags );
-	ret = videobuf_reqbufs( &grb_info_ptr->videobuf_queue_grb, req );
-	print_videobuf_queue_param( &grb_info_ptr->videobuf_queue_grb, 4 );
-	return ret;
-}
-
-static int vidioc_querybuf_grb( struct file *file_ptr, void *fh, struct v4l2_buffer *buf ) {
-	struct grb_info *grb_info_ptr = video_drvdata(file_ptr);
-	int ret;
-
-	if (buf->type != V4L2_BUF_TYPE_VIDEO_CAPTURE) {
-		GRB_DBG_PRINT( "Invalid buffer type\n" )
-		return  -EINVAL;
-	}
-
-	ret = videobuf_querybuf(&grb_info_ptr->videobuf_queue_grb, buf);
-	print_v4l2_buffer( "vidioc_querybuf_grb", buf );
-	print_videobuf_queue_param( &grb_info_ptr->videobuf_queue_grb, 4 );
-	return ret;
-}
-
-static int vidioc_qbuf_grb( struct file *file_ptr, void *fh, struct v4l2_buffer *buf ) {
-	struct grb_info *grb_info_ptr = video_drvdata(file_ptr);
-	int ret;
-
-	if (buf->type != V4L2_BUF_TYPE_VIDEO_CAPTURE) {
-		GRB_DBG_PRINT( "Invalid buffer type\n" )
-		return  -EINVAL;
-	}
-
-	ret = videobuf_qbuf(&grb_info_ptr->videobuf_queue_grb, buf);
-	print_v4l2_buffer( "vidioc_qbuf_grb", buf );
-	print_videobuf_queue_param( &grb_info_ptr->videobuf_queue_grb, 4 );
-	return ret;
-}
-
-static int vidioc_dqbuf_grb( struct file *file_ptr, void *fh, struct v4l2_buffer *buf ) {
-	struct grb_info *grb_info_ptr = video_drvdata(file_ptr);
-	struct videobuf_queue* videobuf_queue = &grb_info_ptr->videobuf_queue_grb;
-	int ret;
-
-	if (buf->type != V4L2_BUF_TYPE_VIDEO_CAPTURE) {
-		GRB_DBG_PRINT( "Invalid buffer type\n" )
-		return  -EINVAL;
-	}
-
-	ret = videobuf_dqbuf( videobuf_queue, buf, file_ptr->f_flags & O_NONBLOCK );
-	print_v4l2_buffer( "vidioc_dqbuf_grb", buf );
-	print_videobuf_queue_param( &grb_info_ptr->videobuf_queue_grb, 4 );
-	return ret;
-}
-
-static int vidioc_streamon_grb( struct file *file_ptr, void *fh, enum v4l2_buf_type type ) {
-	struct grb_info *grb_info_ptr = video_drvdata(file_ptr);
-	int retval;
-	void __iomem* base_addr = grb_info_ptr->base_addr_regs_grb;
-
-	GRB_DBG_PRINT_PROC_CALL
-	if( type != V4L2_BUF_TYPE_VIDEO_CAPTURE )
-		return -EINVAL;
-
-	dump_all_regs("Dump regs before vidioc_streamon_grb", base_addr);
-
-	/* Enable stream on the sub device */
-	retval = v4l2_subdev_call(grb_info_ptr->entity.subdev, video, s_stream, 1);
-	if (retval && retval != -ENOIOCTLCMD) {
-		dev_err(grb_info_ptr->dev, "stream on failed in subdev\n");
-		return retval;
-	}
-
-	retval = v4l2_ctrl_handler_setup(&grb_info_ptr->hdl);
-	if( retval < 0 ) {
-		dev_err(grb_info_ptr->dev,  "v4l2_ctrl_handler_setup failed \n");
-		goto err_start_stream;
-	}
-
-	retval = setup_registers( grb_info_ptr );
-	if( retval < 0 ) {
-		dev_err(grb_info_ptr->dev,  "set_register failed \n");
-		goto err_start_stream;
-	}
-	retval = videobuf_streamon( &grb_info_ptr->videobuf_queue_grb );
-	if( retval < 0 ) {
-		dev_err(grb_info_ptr->dev,  "videobuf_streamon failed \n");
-		goto err_start_stream;
-	}
-
-	dump_all_regs("Dump regs after vidioc_streamon_grb", base_addr);
-	return retval;
-
-err_start_stream:
-	v4l2_subdev_call(grb_info_ptr->entity.subdev, video, s_stream, 0);
-	return retval;
-}
-
-static int vidioc_streamoff_grb( struct file *file_ptr, void *__fh, enum v4l2_buf_type type ) {
-	struct grb_info *grb_info_ptr = video_drvdata(file_ptr);
-	int retval;
-	GRB_DBG_PRINT_PROC_CALL
-	if ( type != V4L2_BUF_TYPE_VIDEO_CAPTURE )
-		return -EINVAL;
-
-	/* Disable stream on the sub device */
-	retval = v4l2_subdev_call(grb_info_ptr->entity.subdev, video, s_stream, 0);
-	if (retval && retval != -ENOIOCTLCMD)
-		dev_err(grb_info_ptr->dev, "stream off failed in subdev\n");
-
-	retval = videobuf_streamoff( &grb_info_ptr->videobuf_queue_grb );
-	reset_grab( grb_info_ptr->base_addr_regs_grb );
-	return retval;
-}
 /*
 static void print_gamma_cs( struct grb_gamma* g ) {
 	int i;
@@ -1144,26 +1170,26 @@ static void print_gamma_cs( struct grb_gamma* g ) {
 	GRB_DBG_PRINT( "Gamma table checksum=%08x", cs )
 }
 */
-static void drv_set_gamma( struct grb_info *grb_info_ptr, void *arg ) {
+static void drv_set_gamma( struct grb_info *grb, void *arg ) {
 	struct grb_gamma* gam = (struct grb_gamma*)arg;
-	grb_info_ptr->gam = *gam;
-	//print_gamma_cs( &grb_info_ptr->gam );
+	grb->gam = *gam;
+	//print_gamma_cs( &grb->gam );
 }
 
-static void drv_vidioc_g_params( struct grb_info *grb_info_ptr, void *arg ) {
+static void drv_vidioc_g_params( struct grb_info *grb, void *arg ) {
 	struct grb_parameters* param = (struct grb_parameters*)arg;
 	GRB_DBG_PRINT_PROC_CALL
-	param = &grb_info_ptr->param;
+	param = &grb->param;
 }
 
-static int drv_vidioc_s_params( struct grb_info *grb_info_ptr, void *arg ) { // VIDIOC_S_PARAMS
+static int drv_vidioc_s_params( struct grb_info *grb, void *arg ) { // VIDIOC_S_PARAMS
 	struct grb_parameters* param = (struct grb_parameters*)arg;
 	GRB_DBG_PRINT_PROC_CALL
-	grb_info_ptr->param = *param;
-	return set_input_format( grb_info_ptr );
+	grb->param = *param;
+	return set_input_format( grb );
 }
 
-static int drv_vidioc_auto_detect( struct grb_info *grb_info_ptr, void *arg )
+static int drv_vidioc_auto_detect( struct grb_info *grb, void *arg )
 { // todo mutex
 	struct v4l2_pix_format* recognize_format = (struct v4l2_pix_format*)arg;
 	int retval;
@@ -1171,104 +1197,121 @@ static int drv_vidioc_auto_detect( struct grb_info *grb_info_ptr, void *arg )
 	GRB_DBG_PRINT_PROC_CALL
 
 	/* Enable stream on the sub device */
-	retval = v4l2_subdev_call(grb_info_ptr->entity.subdev, video, s_stream, 1);
+	retval = v4l2_subdev_call(grb->entity.subdev, video, s_stream, 1);
 	if (retval && retval != -ENOIOCTLCMD) {
 		GRB_DBG_PRINT( "stream on failed in subdev\n" );
 		return retval;
 	}
 
-
-	if( reset_grab( grb_info_ptr->base_addr_regs_grb ) ) {
+	if( reset_grab( grb->regs ) ) {
 		GRB_DBG_PRINT( "reset failed\n" )
 		return -EIO;
 	}
 
-	init_completion( &grb_info_ptr->cmpl );
-	set_register( INT_BIT_DONE, grb_info_ptr->base_addr_regs_grb, ADDR_INT_STATUS );
-	set_register( INT_BIT_DONE, grb_info_ptr->base_addr_regs_grb, ADDR_INT_MASK );
-	write_register( 1 , grb_info_ptr->base_addr_regs_grb, ADDR_REC_ENABLE );
-	//print_registers( grb_info_ptr->base_addr_regs_grb, 0x100, 0x108 );
+	init_completion( &grb->cmpl );
+	set_register( INT_BIT_DONE, grb->regs, ADDR_INT_STATUS );
+	set_register( INT_BIT_DONE, grb->regs, ADDR_INT_MASK );
+	write_register( 1 , grb->regs, ADDR_REC_ENABLE );
 
-	if( wait_for_completion_timeout( &grb_info_ptr->cmpl, (HZ/2) ) == 0 ) {
+	if( wait_for_completion_timeout( &grb->cmpl, (HZ/2) ) == 0 ) {
 		GRB_DBG_PRINT( "Vidioc autodetection: timeout\n" )
-		v4l2_subdev_call(grb_info_ptr->entity.subdev, video, s_stream, 0);
+		v4l2_subdev_call(grb->entity.subdev, video, s_stream, 0);
 		return -ETIMEDOUT;
 	}
 
-	//TODO
-	//Need get format from subdev!!!
-
-	print_v4l2_pix_format(&grb_info_ptr->recognize_format);
+	print_v4l2_pix_format(&grb->recognize_format);
 
 	if( recognize_format )
-		*recognize_format = grb_info_ptr->recognize_format;
+		*recognize_format = grb->recognize_format;
 
-	v4l2_subdev_call(grb_info_ptr->entity.subdev, video, s_stream, 0);
+	v4l2_subdev_call(grb->entity.subdev, video, s_stream, 0);
 
 	return 0;
 }
 
 static long vidioc_default_grb( struct file *file_ptr, void *fh, bool valid_prio, unsigned int cmd, void *arg )
 {
-	struct grb_info *grb_info_ptr = video_drvdata( file_ptr );
+	struct grb_info *grb = video_drvdata( file_ptr );
 	GRB_DBG_PRINT( "Vidioc ioctl default: cmd=%08x\n", cmd )
 	switch (cmd) {
 	case VIDIOC_SET_GAMMA:
 		GRB_DBG_PRINT( "Vidioc ioctl default: VIDIOC_SET_GAMMA\n")
-		drv_set_gamma( grb_info_ptr, arg );
+		drv_set_gamma( grb, arg );
 		return 0;
 	case VIDIOC_G_PARAMS:
 		GRB_DBG_PRINT( "Vidioc ioctl default: VIDIOC_G_PARAMS\n")
-		drv_vidioc_g_params( grb_info_ptr, arg );
+		drv_vidioc_g_params( grb, arg );
 		return 0;
     case VIDIOC_S_PARAMS:
 		GRB_DBG_PRINT( "Vidioc ioctl default: VIDIOC_S_PARAMS\n")
-		drv_vidioc_s_params( grb_info_ptr, arg );
+		drv_vidioc_s_params( grb, arg );
 		return 0;
 	case VIDIOC_AUTO_DETECT:
 		GRB_DBG_PRINT( "Vidioc ioctl default: VIDIOC_AUTO_DETECT\n")
-		return drv_vidioc_auto_detect( grb_info_ptr, arg );
+		return drv_vidioc_auto_detect( grb, arg );
 	default:
 		return -ENOTTY;
 	}
 }
-// 0-target=2,flag=0,rect=0,0,0,0; 1-target=1,flag=2,rect=0,0,0x500, 0x2d0
+
+static void grb_try_compose(struct grb_info *grb, struct v4l2_rect *r)
+{
+
+	r->width = clamp_t(u32, r->width, 0, grb->format.fmt.pix.width);
+	r->height = clamp_t(u32, r->height, 0, grb->format.fmt.pix.height);
+
+	r->left = clamp_t(u32, r->left, 0, grb->format.fmt.pix.width - r->width);
+	r->top  = clamp_t(u32, r->top, 0, grb->format.fmt.pix.height - r->height);
+
+}
+
+
 static int vidioc_g_selection_grb( struct file *file, void *fh, struct v4l2_selection *s ) {
-	int ret = 0;
-	struct grb_info *grb_info_ptr = video_drvdata(file);
+	struct grb_info *grb = video_drvdata(file);
 
-	if (s->type != V4L2_BUF_TYPE_VIDEO_CAPTURE) {
-		s->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	if (s->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
+		return -EINVAL;
+
+	switch (s->target) {
+	case V4L2_SEL_TGT_CROP_BOUNDS:
+	case V4L2_SEL_TGT_CROP_DEFAULT:
+		s->r.left = 0;
+		s->r.top = 0;
+		s->r.width = grb->format.fmt.pix.width;
+		s->r.height = grb->format.fmt.pix.height;
+		return 0;
+
+	case V4L2_SEL_TGT_CROP:
+		s->r = grb->cropping;
+		return 0;
 	}
 
-	if( s->target == V4L2_SEL_TGT_CROP ) {				// 0: Crop rectangle. Defines the cropped area.
-		s->r = grb_info_ptr->cropping;
-	}
-	else if( s->target == V4L2_SEL_TGT_CROP_BOUNDS ) {	// 2: Bounds of the crop rectangle.
-		s->r.left = 0;									// All valid crop rectangles fit inside the crop bounds rectangle.
-		s->r.top = 0;
-		s->r.width = grb_info_ptr->format.fmt.pix.width;
-		s->r.height = grb_info_ptr->format.fmt.pix.height;
-	}
-	else if( s->target == V4L2_SEL_TGT_CROP_DEFAULT ) {	// 1:Suggested cropping rectangle that covers the “whole picture”.
-		s->r.left = 0;									// This includes only active pixels and excludes other non-active pixels such as black pixels.
-		s->r.top = 0;
-		s->r.width = grb_info_ptr->format.fmt.pix.width;
-		s->r.height = grb_info_ptr->format.fmt.pix.height;
-	}
-	else
-		ret = -EINVAL;
-//exit:
-	if( !ret ) memset( s->reserved, 0, sizeof(s->reserved) );
-	return ret;
+	return -EINVAL;
 }
 
 static int vidioc_s_selection_grb( struct file *file, void *fh, struct v4l2_selection *s ) {
-	struct grb_info *grb_info_ptr = video_drvdata(file);
+	struct grb_info *grb = video_drvdata(file);
+	struct v4l2_rect rect = s->r;
+
 	GRB_DBG_PRINT_PROC_CALL
-	if (s->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
+
+	if (s->type != V4L2_BUF_TYPE_VIDEO_CAPTURE ||
+	    s->target != V4L2_SEL_TGT_CROP)
 		return -EINVAL;
-	grb_info_ptr->cropping = s->r; // rect
+
+	if (vb2_is_busy(&grb->queue))
+		return -EBUSY;
+
+	if (rect.top < 0 || rect.left < 0) {
+		v4l2_err(&grb->v4l2_dev,
+			"doesn't support negative values for top & left\n");
+		return -EINVAL;
+	}
+
+	grb_try_compose(grb, &rect);
+
+	s->r = rect;
+	grb->cropping = rect; // rect
 	return 0;
 }
 
@@ -1303,12 +1346,46 @@ static int grb_s_ctrl(struct v4l2_ctrl *ctrl)
 		return -EINVAL;
 	}
 
-	//set_input_format( grb );
+	return 0;
+}
+
+static int grb_s_volatile_ctrl(struct v4l2_ctrl *ctrl)
+{
+	struct grb_info *grb =
+		container_of(ctrl->handler, struct grb_info, hdl);
+
+	switch (ctrl->id) {
+	case RCM_GRB_CID_SYNC:
+		ctrl->val = grb->param.sync;
+		GRB_DBG_PRINT( "%s: sync=%d\n", __func__, ctrl->val);
+		break;
+	case RCM_GRB_CID_STD_IN:
+		ctrl->val = grb->param.std_in;
+		GRB_DBG_PRINT( "%s: std_in=%d\n", __func__, ctrl->val);
+		break;
+	case RCM_GRB_CID_D_V_IF:
+		ctrl->val = grb->param.v_if;
+		GRB_DBG_PRINT( "%s: v_if=%d\n", __func__, ctrl->val);
+		break;
+	case RCM_GRB_CID_D_FORMAT:
+		ctrl->val = grb->param.d_format;
+		GRB_DBG_PRINT( "%s: d_format=%d\n", __func__, ctrl->val);
+		break;
+	case RCM_GRB_CID_STD_OUT:
+		ctrl->val = grb->param.std_out;
+		GRB_DBG_PRINT( "%s: std_out=%d\n", __func__, ctrl->val);
+		break;
+
+	default:
+		return -EINVAL;
+	}
+
 	return 0;
 }
 
 static const struct v4l2_ctrl_ops grb_ctrl_ops = {
-	.s_ctrl = grb_s_ctrl,
+	.s_ctrl 			= grb_s_ctrl,
+	.g_volatile_ctrl	= grb_s_volatile_ctrl,
 };
 
 static const struct v4l2_ctrl_config grb_sync = {
@@ -1366,101 +1443,6 @@ static const struct v4l2_ctrl_config grb_stdout = {
 	.step = 1,
 };
 
-#if 0
-static int vidioc_queryctrl_grb( struct file *file, void *fh, struct v4l2_queryctrl *a ) {
-	//GRB_DBG_PRINT( "vidioc_queryctrl_grb entry: id=%x,type=%x,name=%s\n", a->id, a->type, a->name )
-	switch( a->id ) {
-	case RCM_GRB_CID_SYNC:
-		strlcpy( a->name, "sync", sizeof(a->name) );
-		a->minimum = 0, a->maximum = 1, a->step = 1, a->default_value = SYNC_EXTERNAL;
-		break;
-	case RCM_GRB_CID_STD_IN:
-		strlcpy( a->name, "stdin", sizeof(a->name) );
-		a->minimum = 0, a->maximum = 1, a->step = 1, a->default_value = STD_CLR_HD;
-		break;
-	case RCM_GRB_CID_D_V_IF:
-		strlcpy( a->name, "dvif", sizeof(a->name) );
-		a->minimum = 0, a->maximum = 1, a->step = 1, a->default_value = V_IF_SERIAL;
-		break;
-	case RCM_GRB_CID_D_FORMAT:
-		strlcpy( a->name, "dformat", sizeof(a->name) );
-		a->minimum = 0, a->maximum = 2, a->step = 1, a->default_value = D_FMT_YCBCR422;
-		break;
-	case RCM_GRB_CID_STD_OUT:
-		strlcpy( a->name, "stdout", sizeof(a->name) );
-		a->minimum = 0, a->maximum = 1, a->step = 1, a->default_value = STD_CLR_HD;
-		break;
-	default:
-		return -EINVAL;
-	}
-	a->type = V4L2_CTRL_TYPE_INTEGER;
-	a->flags = 0;
-	a->reserved[0] = a->reserved[1] = 0;
-	return 0;
-}
-
-static int vidioc_s_ctrl_grb( struct file *file, void *fh, struct v4l2_control *a ) {
-	struct grb_info *grb_info_ptr = video_drvdata(file);
-	struct grb_parameters *grb_parameters_ptr = &grb_info_ptr->param;
-
-	GRB_DBG_PRINT( "vidioc_s_ctrl_grb: id=%x,value=%x\n", a->id, a->value )
-	switch( a->id ) {
-	case RCM_GRB_CID_SYNC:
-		grb_parameters_ptr->sync = a->value;
-		break;
-	case RCM_GRB_CID_STD_IN:
-		grb_parameters_ptr->std_in = a->value;
-		break;
-	case RCM_GRB_CID_D_V_IF:
-		grb_parameters_ptr->v_if = a->value;
-		break;
-	case RCM_GRB_CID_D_FORMAT:
-		grb_parameters_ptr->d_format = a->value;
-		break;
-	case RCM_GRB_CID_STD_OUT:
-		grb_parameters_ptr->std_out = a->value;
-		break;
-	case V4L2_CID_ALPHA_COMPONENT:
-		grb_parameters_ptr->alpha = a->value;
-		break;
-	default:
-		return -EINVAL;
-	}
-	set_input_format( grb_info_ptr );
-	return 0;
-}
-
-static int vidioc_g_ctrl_grb( struct file *file, void *fh, struct v4l2_control *a ) {
-	struct grb_info *grb_info_ptr = video_drvdata(file);
-	struct grb_parameters *grb_parameters_ptr = &grb_info_ptr->param;
-
-	//GRB_DBG_PRINT( "vidioc_g_ctrl_grb: id=%x,value=%x\n", a->id, a->value )
-	switch( a->id ) {
-	case RCM_GRB_CID_SYNC:
-		a->value = grb_parameters_ptr->sync;
-		break;
-	case RCM_GRB_CID_STD_IN:
-		a->value = grb_parameters_ptr->std_in;
-		break;
-	case RCM_GRB_CID_D_V_IF:
-		a->value = grb_parameters_ptr->v_if;
-		break;
-	case RCM_GRB_CID_D_FORMAT:
-		a->value = grb_parameters_ptr->d_format;
-		break;
-	case RCM_GRB_CID_STD_OUT:
-		a->value = grb_parameters_ptr->std_out;
-		break;
-	case V4L2_CID_ALPHA_COMPONENT:
-		a->value = grb_parameters_ptr->alpha;
-		break;
-	default:
-		return -EINVAL;
-	}
-	return 0;
-}
-#endif
-
 static int vidioc_enum_frameintervals_grb( struct file *file, void *fh, struct v4l2_frmivalenum *fival ) {
 	GRB_DBG_PRINT( "vidioc_enum_frameintervals: index=%u,pixel_format=%08x,width=%u,height=%u,type=%u\n",
 					fival->index, fival->pixel_format, fival->width, fival->height, fival->type )
@@ -1491,20 +1473,20 @@ static int vidioc_s_parm_grb( struct file *file, void *fh, struct v4l2_streampar
 }
 
 static int vidioc_enum_input_grb( struct file *file, void *fh, struct v4l2_input *inp ) {
-	struct grb_info *grb_info_ptr = video_drvdata(file);
+	struct grb_info *grb = video_drvdata(file);
 
 	GRB_DBG_PRINT( "vidioc_enum_input_grb: index=%u\n", inp->index )
 	if( inp->index != 0 )
 		return -EINVAL;
 
-	snprintf( inp->name, sizeof(inp->name), "%s(%08x)", RCM_GRB_DEVICE_NAME, (u32)grb_info_ptr->phys_addr_regs_grb );
+	snprintf( inp->name, sizeof(inp->name), "%s(%08x)", RCM_GRB_DEVICE_NAME, (u32)grb->phys_addr_regs );
 	inp->type = V4L2_INPUT_TYPE_CAMERA;
 //	inp->audioset = 0;
 //	inp->tuner = 0;
 //	inp->std = V4L2_STD_ALL;
 //	inp->status = 0;		// todo V4L2_IN_ST_NO_SIGNAL,if it's so
 	inp->capabilities = 0;
-//	inp->reserved[0] = inp->reserved[1] = inp->reserved[2] = 0;
+	inp->reserved[0] = inp->reserved[1] = inp->reserved[2] = 0;
 	return 0;
 }
 
@@ -1524,55 +1506,47 @@ static int vidioc_s_input_grb( struct file *file, void *fh, unsigned int i ) {
 // grb capture ioctl operations 
 static const struct v4l2_ioctl_ops grb_ioctl_ops = {
 	.vidioc_querycap			= vidioc_querycap_grb,
-//	.vidioc_cropcap				= vidioc_cropcap_grb,					// VIDIOC_CROPCAP
-//	.vidioc_g_crop				= vidioc_g_crop_grb,					// VIDIOC_G_CROP
-//	.vidioc_s_crop				= vidioc_s_crop_grb,					// VIDIOC_S_CROP
+
 	.vidioc_enum_fmt_vid_cap	= vidioc_enum_fmt_vid_cap_grb,
 	.vidioc_g_fmt_vid_cap		= vidioc_g_fmt_vid_cap_grb,
 	.vidioc_s_fmt_vid_cap		= vidioc_s_fmt_vid_cap_grb,
 	.vidioc_try_fmt_vid_cap		= vidioc_try_fmt_vid_cap_grb,
-	.vidioc_reqbufs				= vidioc_reqbufs_grb,
-	.vidioc_querybuf			= vidioc_querybuf_grb,
-	.vidioc_qbuf				= vidioc_qbuf_grb,
-	.vidioc_dqbuf				= vidioc_dqbuf_grb,
-	.vidioc_streamon			= vidioc_streamon_grb,
-	.vidioc_streamoff			= vidioc_streamoff_grb,
+
+	.vidioc_g_parm				= vidioc_g_parm_grb,
+	.vidioc_s_parm				= vidioc_s_parm_grb,
+	.vidioc_enum_frameintervals	= vidioc_enum_frameintervals_grb,
+	.vidioc_enum_framesizes		= vidioc_enum_framesizes_grb,
+
 	.vidioc_default				= vidioc_default_grb,
 	.vidioc_g_selection			= vidioc_g_selection_grb,
 	.vidioc_s_selection			= vidioc_s_selection_grb,
-//	.vidioc_queryctrl			= vidioc_queryctrl_grb,
-//	.vidioc_g_ctrl				= vidioc_g_ctrl_grb,					// for future modification
-//	.vidioc_s_ctrl				= vidioc_s_ctrl_grb,					// ...
-	.vidioc_enum_frameintervals	= vidioc_enum_frameintervals_grb,
-	.vidioc_enum_framesizes		= vidioc_enum_framesizes_grb,
-	.vidioc_g_parm				= vidioc_g_parm_grb,
-	.vidioc_s_parm				= vidioc_s_parm_grb,
+
 	.vidioc_enum_input			= vidioc_enum_input_grb,
 	.vidioc_g_input				= vidioc_g_input_grb,
-	.vidioc_s_input				= vidioc_s_input_grb
+	.vidioc_s_input				= vidioc_s_input_grb,
+
+	.vidioc_reqbufs				= vb2_ioctl_reqbufs,
+	.vidioc_create_bufs			= vb2_ioctl_create_bufs,
+	.vidioc_querybuf			= vb2_ioctl_querybuf,
+	.vidioc_qbuf				= vb2_ioctl_qbuf,
+	.vidioc_dqbuf				= vb2_ioctl_dqbuf,
+	.vidioc_expbuf				= vb2_ioctl_expbuf,
+	.vidioc_prepare_buf			= vb2_ioctl_prepare_buf,
+	.vidioc_streamon			= vb2_ioctl_streamon,
+	.vidioc_streamoff			= vb2_ioctl_streamoff,
+
+//	.vidioc_log_status			= v4l2_ctrl_log_status,
+	.vidioc_subscribe_event		= v4l2_ctrl_subscribe_event,
+	.vidioc_unsubscribe_event	= v4l2_event_unsubscribe
 };
 
-static struct videobuf_buffer* grb_next_buffer( struct list_head* buffer_queue ) { // from interrupt context,because without spinlock
-	struct videobuf_buffer* vb = NULL;
 
-	if( list_empty( buffer_queue ) )
-		goto out;
-
-	vb = list_entry( buffer_queue->next, struct videobuf_buffer, queue );
-	list_del( &vb->queue );
-	vb->state = VIDEOBUF_ACTIVE;
-out:
-	return vb;
-}
-
-static irqreturn_t proc_interrupt (struct grb_info *grb_info_ptr) {
+static irqreturn_t proc_interrupt (struct grb_info *grb) {
 	int rd_data;
 	void __iomem *base_addr;
-	struct videobuf_buffer *vb;
-	u32 base_addr0_dma, base_addr1_dma, base_addr2_dma;
 	int switch_page;
 
-	base_addr = grb_info_ptr->base_addr_regs_grb;
+	base_addr = grb->regs;
 	rd_data = read_register( base_addr, ADDR_INTERRUPTION );
 	if( rd_data != 1 )
 		return IRQ_NONE;
@@ -1585,48 +1559,22 @@ static irqreturn_t proc_interrupt (struct grb_info *grb_info_ptr) {
 		write_register( 0 , base_addr, ADDR_TEST_INT );
 		set_register( INT_BIT_TEST, base_addr, ADDR_INT_STATUS );
 		clr_register( INT_BIT_TEST, base_addr, ADDR_INT_MASK );
-		complete_all( &grb_info_ptr->cmpl );
+		complete_all( &grb->cmpl );
 	}
 	else if( rd_data & INT_BIT_END_WRITE ) {
 		GRB_DBG_PRINT( "irq_handler: end write detected\n" )
 
 		set_register( INT_BIT_END_WRITE, base_addr, ADDR_INT_STATUS );
 
-		if( ( vb = grb_next_buffer( &grb_info_ptr->buffer_queue ) ) == NULL ) {
-			GRB_DBG_PRINT( "irq_handler: next buffer 0\n" )
-			clr_register( INT_BIT_END_WRITE, base_addr, ADDR_INT_MASK );
-			write_register( 0, base_addr, ADDR_ENABLE );
-			return IRQ_HANDLED;
+		switch_page = grb->sequence & 1;
+
+		if (buffer_flip(grb, grb->sequence++)) {
+			dev_warn(grb->dev, "%s: Flip failed\n", __func__);
+			capture_stop(grb);
 		}
 
-		vb->state = VIDEOBUF_DONE;
-		wake_up( &vb->done );
-		switch_page = grb_info_ptr->frame_count & 1;
+		GRB_DBG_PRINT( "irq_handler: sequence = %d; switch_page = %d\n", grb->sequence , switch_page )
 
-		grb_info_ptr->frame_count = grb_info_ptr->frame_count + 1;
-
-		GRB_DBG_PRINT( "irq_handler: frame_count = %d; switch_page = %d\n", grb_info_ptr->frame_count , switch_page )
-		print_videobuf_queue_param2( &grb_info_ptr->videobuf_queue_grb, grb_info_ptr->frame_count-1, 0, grb_info_ptr->mem_offset1/*-4*/, grb_info_ptr->mem_offset2/*-4*/ );
-
-		if( grb_info_ptr->next_buf_num < grb_info_ptr->reqv_buf_cnt ) { // prepare next buffer,if it avalaible
-			base_addr0_dma = videobuf_to_dma_contig_rcm( grb_info_ptr->videobuf_queue_grb.bufs[grb_info_ptr->next_buf_num] );
-			//base_addr1_dma = base_addr0_dma + grb_info_ptr->mem_offset1;
-			//base_addr2_dma = base_addr0_dma + grb_info_ptr->mem_offset2;
-			setup_dma_addr( grb_info_ptr->out_f.format_dout, grb_info_ptr->mem_offset1, grb_info_ptr->mem_offset2,
-									base_addr0_dma, &base_addr1_dma, &base_addr2_dma );
-
-			if( switch_page == 0 ) {
-				write_register( base_addr0_dma, base_addr, ADDR_DMA0_ADDR0 );
-				write_register( base_addr1_dma, base_addr, ADDR_DMA1_ADDR0 );
-				write_register( base_addr2_dma, base_addr, ADDR_DMA2_ADDR0 );
-			}
-			else {
-				write_register( base_addr0_dma, base_addr, ADDR_DMA0_ADDR1 );
-				write_register( base_addr1_dma, base_addr, ADDR_DMA1_ADDR1 );
-				write_register( base_addr2_dma, base_addr, ADDR_DMA2_ADDR1 );
-			}
-			grb_info_ptr->next_buf_num = grb_info_ptr->next_buf_num + 1;
-		}
 	}
 	else if( rd_data & INT_BIT_DONE ) {
 		unsigned int frame_size, frame_param;
@@ -1636,12 +1584,12 @@ static irqreturn_t proc_interrupt (struct grb_info *grb_info_ptr) {
 		set_register( INT_BIT_DONE, base_addr, ADDR_INT_STATUS );
 		clr_register( INT_BIT_DONE, base_addr, ADDR_INT_MASK );
 		frame_size = read_register( base_addr, ADDR_FRAME_SIZE );
-		grb_info_ptr->recognize_format.height  = (frame_size >> 16) & 0xFFF;	// 27:16-height
-		grb_info_ptr->recognize_format.width = frame_size & 0xFFF;				// 11:0-width
+		grb->recognize_format.height  = (frame_size >> 16) & 0xFFF;	// 27:16-height
+		grb->recognize_format.width = frame_size & 0xFFF;				// 11:0-width
 		frame_param = read_register( base_addr, ADDR_FRAME_PARAM );
-		grb_info_ptr->recognize_format.pixelformat = 0;						// set format default?
-		grb_info_ptr->recognize_format.field = ( frame_param & 0x10 ) ? V4L2_FIELD_INTERLACED : V4L2_FIELD_NONE;
-		complete_all( &grb_info_ptr->cmpl );
+		grb->recognize_format.pixelformat = 0;						// set format default?
+		grb->recognize_format.field = ( frame_param & 0x10 ) ? V4L2_FIELD_INTERLACED : V4L2_FIELD_NONE;
+		complete_all( &grb->cmpl );
 
 		print_detected_frame_info(frame_size, frame_param);
 	}
@@ -1653,11 +1601,13 @@ static irqreturn_t proc_interrupt (struct grb_info *grb_info_ptr) {
 }
 
 static irqreturn_t irq_handler( int irq, void* dev ) {
-	struct grb_info *grb_info_ptr = (struct grb_info*) dev;
+	struct grb_info *grb = (struct grb_info*) dev;
 	irqreturn_t grb_irq;
-	spin_lock( &grb_info_ptr->irq_lock );
-	grb_irq = proc_interrupt( grb_info_ptr );
-	spin_unlock( &grb_info_ptr->irq_lock );
+
+	spin_lock( &grb->irq_lock );
+	grb_irq = proc_interrupt( grb );
+	spin_unlock( &grb->irq_lock );
+
 	return grb_irq;
 }
 
@@ -1668,23 +1618,6 @@ static int grb_graph_notify_complete(struct v4l2_async_notifier *notifier)
 
 	if(grb->entity.subdev)
 		v4l2_ctrl_add_handler(grb->v4l2_dev.ctrl_handler, grb->entity.subdev->ctrl_handler, NULL, true);
-
-	//grb->video_dev.ctrl_handler = grb->entity.subdev->ctrl_handler;
-
-#if 0 //need correct
-	ret = grb_formats_init(grb);
-	if (ret) {
-		dev_err(grb->video_dev, "No supported mediabus format found\n");
-		return ret;
-	}
-	grb_camera_set_bus_param(grb);
-
-	ret = grb_set_default_fmt(grb);
-	if (ret) {
-		dev_err(grb->dev, "Could not set default format\n");
-		return ret;
-	}
-#endif
 
 	ret = video_register_device(&grb->video_dev, VFL_TYPE_GRABBER, -1);
 	if (ret) {
@@ -1747,7 +1680,6 @@ static int grb_graph_notify_bound(struct v4l2_async_notifier *notifier,
 		dev_err(grb->dev, "Couldn't find output pad for subdev %s\n", subdev->name);
 		return grb->src_pad;
 	}
-
 
 	/* Locate the entity corresponding to the bound subdev and store the
 	 * subdev pointer.
@@ -1837,261 +1769,269 @@ static int grb_graph_init(struct grb_info *grb)
 	return 0;
 }
 
-static int get_memory_buffer_address( const struct platform_device* grb_device,  const char* res_name, struct resource* res_ptr ) {
+static int get_memory_buffer_address( const struct platform_device* pdev,  const char* res_name, struct resource* res_ptr ) {
 	int ret;
 	struct device_node* np;
-	if( ( np  = of_parse_phandle( grb_device->dev.of_node, res_name, 0 ) ) == NULL ) {
-		//GRB_DBG_PRINT( "ERROR : can't get the device node of the memory-region") 
+	if( ( np  = of_parse_phandle( pdev->dev.of_node, res_name, 0 ) ) == NULL ) {
+		dev_err( &pdev->dev, "can't get the device node of the memory-region\n" );
 		return -ENODEV;
 	}
 	if( ( ret = of_address_to_resource( np, 0, res_ptr ) ) != 0 ) {
-		//GRB_DBG_PRINT( "ERROR : can't get the resource of the memory area")
+		dev_err( &pdev->dev, "can't get the resource of the memory area\n" );
 		return ret;
 	}
 	return 0;
 }
 
-static int test_interrupt( struct grb_info *grb_info_ptr ) {	// test interrupt started,handler must be calling 
-	init_completion( &grb_info_ptr->cmpl );
-	set_register( INT_BIT_TEST, grb_info_ptr->base_addr_regs_grb, ADDR_INT_MASK );
-	write_register( 1, grb_info_ptr->base_addr_regs_grb, ADDR_TEST_INT );
-	if( wait_for_completion_timeout( &grb_info_ptr->cmpl, HZ ) == 0 ) {
-		GRB_DBG_PRINT( "Test interrupt: timeout\n" )
+static int test_interrupt( struct grb_info *grb ) {	// test interrupt started,handler must be calling 
+	init_completion( &grb->cmpl );
+	set_register( INT_BIT_TEST, grb->regs, ADDR_INT_MASK );
+	write_register( 1, grb->regs, ADDR_TEST_INT );
+	if( wait_for_completion_timeout( &grb->cmpl, HZ ) == 0 ) {
+		dev_err( grb->dev, "Test interrupt: timeout\n" );
 		return -ETIMEDOUT;
 	}
 	return 0;
 }
 
-static int get_resources( struct platform_device *grb_device, struct grb_info *grb_info_ptr ) {
-	struct device* dev = &grb_device->dev;
-	struct resource* grb_res_ptr;
-
-	grb_res_ptr = platform_get_resource( grb_device, IORESOURCE_MEM, 0 );
-	if( !grb_res_ptr ) {
-		dev_err( dev, "can't get the base address registers grabber" );
-		return -EINVAL;
-	}
-	grb_info_ptr->phys_addr_regs_grb = grb_res_ptr->start; // it is for information only
-
-	grb_info_ptr->base_addr_regs_grb = devm_ioremap_resource( &grb_device->dev, grb_res_ptr );
-	if( IS_ERR( grb_info_ptr->base_addr_regs_grb ) ) {
-		dev_err( dev, "can't ioremap grabber resource");
-		return PTR_ERR( grb_info_ptr->base_addr_regs_grb );
-	}
-
-	if( read_register( grb_info_ptr->base_addr_regs_grb, ADDR_ID_REG) != RCM_GRB_DEVID ) {
-		dev_err( dev, "invalid identificator, device not found! \n" );
-		return -ENODEV;
-	}
-
-	if( get_memory_buffer_address( grb_device, "memory-region", grb_res_ptr ) ) {
-		dev_err( dev, "can't get the base address of the memory area" );
-		return -EINVAL;
-	}
-
-	grb_info_ptr->buff_phys_addr = grb_res_ptr->start;
-	grb_info_ptr->buff_length = grb_res_ptr->end - grb_res_ptr->start + 1;
-	grb_info_ptr->buff_dma_addr = (dma_addr_t)(grb_info_ptr->buff_phys_addr - (grb_device->dev.dma_pfn_offset << PAGE_SHIFT));
-
-	grb_res_ptr = platform_get_resource( grb_device, IORESOURCE_IRQ, 0 );
-	if( !grb_res_ptr ) {
-		dev_err( dev,  "can't get base irq" );
-		return -EINVAL;;
-	}
-	grb_info_ptr->num_irq = grb_res_ptr->start;
-	return 0;
-}
-
-static int grb_set_default_fmt(struct grb_info *grb_info_ptr)
+static int grb_set_default_fmt(struct grb_info *grb, const struct v4l2_pix_format *fmt)
 {
 	struct v4l2_format f = {
 		.type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
 	};
 	int ret;
 
-	f.fmt.pix = fmt_default;
+	f.fmt.pix = *fmt;
 
-	ret = grb_try_fmt(grb_info_ptr, &f, NULL);
+	ret = grb_try_fmt(grb, &f, NULL);
 	if (ret) {
-		GRB_DBG_PRINT( "Failed set default format\n")
+		dev_err( grb->dev, "Failed set default format! \n" );
 		return ret;
 	}
 
-	grb_info_ptr->recognize_format.width = XGA_WIDTH;		// it's too, but autodetect will set new values
-	grb_info_ptr->recognize_format.height = XGA_HEIGHT;
-	grb_info_ptr->recognize_format.field = V4L2_FIELD_NONE;
+	grb->recognize_format.width 	= fmt->width;		// it's too, but autodetect will set new values
+	grb->recognize_format.height 	= fmt->height;
+	grb->recognize_format.field 	= fmt->field;
 
-	grb_info_ptr->format = f;
+	grb->format = f;
 	return 0;
 }
 
+static int device_probe( struct platform_device *pdev ) {
+	int irq;
+	struct grb_info *grb;
+	struct resource* res;
+	struct vb2_queue *q;
+	int i, err;
 
-static int device_probe( struct platform_device *grb_device ) {
-	struct grb_info *grb_info_ptr;
-	int err;
-	void __iomem* base_addr;
-
-
-	grb_info_ptr = kzalloc(sizeof(struct grb_info), GFP_KERNEL);
-	if( grb_info_ptr == NULL ) {
-		dev_err( &grb_device->dev, "Can't allocated memory!\n" );
+	grb = devm_kzalloc(&pdev->dev, sizeof(struct grb_info), GFP_KERNEL);
+	if( grb == NULL ) {
+		dev_err( &pdev->dev, "Can't allocated memory!\n" );
 		return -ENOMEM;
 	}
-	grb_info_ptr->dev = &grb_device->dev;
 
-	err = get_resources (grb_device , grb_info_ptr);
-	if( err )
-		goto err_free_mem;
+	for (i = 0; i < RCM_GRB_MAX_FRAME; i++)
+		grb->current_buf[i] = NULL;
 
-	grb_device->dma_mask = DMA_BIT_MASK(32);
-	grb_device->dev.archdata.dma_offset = 0;								// (grb_device->dev.dma_pfn_offset << PAGE_SHIFT);
-
-	err = dma_declare_coherent_memory( &grb_device->dev,					// dev->dma_mem was filled
-									   grb_info_ptr->buff_phys_addr,
-									   grb_info_ptr->buff_phys_addr,		// grb_info_ptr->buff_dma_addr
-									   grb_info_ptr->buff_length );			// DMA_MEMORY_MAP | DMA_MEMORY_EXCLUSIVE
-	if( err ) {
-		dev_err( grb_info_ptr->dev, "declare coherent memory %d\n" , err );
-		goto err_free_mem;
+	res = platform_get_resource( pdev, IORESOURCE_MEM, 0 );
+	grb->phys_addr_regs = res->start; // it is for information only
+	grb->regs = devm_ioremap_resource( &pdev->dev, res );
+	if( IS_ERR( grb->regs ) ) {
+		dev_err( &pdev->dev, "can't ioremap grabber resource");
+		return PTR_ERR( grb->regs );
 	}
-	grb_info_ptr->kern_virt_addr = phys_to_virt( grb_info_ptr->buff_phys_addr );
+
+	if( read_register( grb->regs, ADDR_ID_REG) != RCM_GRB_DEVID ) {
+		dev_err( &pdev->dev, "invalid identificator, device not found! \n" );
+		return -ENODEV;
+	}
+
+	if( get_memory_buffer_address( pdev, "memory-region", res ) ) {
+		dev_err( &pdev->dev, "can't get the base address of the memory area" );
+		return -EINVAL;
+	}
+
+	grb->dev = &pdev->dev;
+	mutex_init(&grb->lock);
+	spin_lock_init(&grb->irq_lock);
+	INIT_LIST_HEAD(&grb->buf_list);
+
+	q = &grb->queue;
+
+	grb->buff_phys_addr = res->start;
+	grb->buff_length = res->end - res->start + 1;
+	grb->buff_dma_addr = (dma_addr_t)(grb->buff_phys_addr - (pdev->dev.dma_pfn_offset << PAGE_SHIFT));
+
+	pdev->dma_mask = DMA_BIT_MASK(32);
+	pdev->dev.archdata.dma_offset = 0;
+
+	err = dma_declare_coherent_memory( &pdev->dev, grb->buff_phys_addr, grb->buff_phys_addr, grb->buff_length );
+	if( err ) {
+		dev_err( &pdev->dev, "declare coherent memory %d\n" , err );
+		goto err_free_mutex;
+	}
+	grb->kern_virt_addr = phys_to_virt( grb->buff_phys_addr );
 	GRB_DBG_PRINT( "Declare coherent memory: for phys addr %llx, dma addr %llx, kern virt addr %x, size %x\n",
-			 	   grb_info_ptr->buff_phys_addr, grb_info_ptr->buff_dma_addr, (u32)grb_info_ptr->kern_virt_addr, grb_info_ptr->buff_length )
+			 	   grb->buff_phys_addr, grb->buff_dma_addr, (u32)grb->kern_virt_addr, grb->buff_length )
 
-	platform_set_drvdata( grb_device, grb_info_ptr ); 
+	platform_set_drvdata( pdev, grb ); 
 
-	grb_info_ptr->video_dev.dev_parent = grb_info_ptr->dev;
-	grb_info_ptr->video_dev.fops = &fops;
-	grb_info_ptr->video_dev.ioctl_ops = &grb_ioctl_ops;
-	strlcpy( grb_info_ptr->video_dev.name, RCM_GRB_DRIVER_NAME, sizeof(grb_info_ptr->video_dev.name) );
-	grb_info_ptr->video_dev.release = video_dev_release;
-	//grb_info_ptr->video_dev.vfl_dir	= VFL_DIR_M2M;
-	//grb_info_ptr->video_dev.tvnorms = V4L2_STD_ATSC_8_VSB + V4L2_STD_ATSC_16_VSB;
+	grb->video_dev.dev_parent = grb->dev;
+	grb->video_dev.fops = &fops;
+	grb->video_dev.ioctl_ops = &grb_ioctl_ops;
+	grb->video_dev.queue = &grb->queue;
+	grb->video_dev.lock = &grb->lock;
+	strlcpy( grb->video_dev.name, RCM_GRB_DRIVER_NAME, sizeof(grb->video_dev.name) );
+	grb->video_dev.release = video_dev_release;
 
-//	grb_info_ptr->in_f.format_din = xx;			// it'default value
-	grb_info_ptr->param.sync = SYNC_EXTERNAL;
-	grb_info_ptr->param.std_in = STD_CLR_SD;
-	grb_info_ptr->param.v_if = V_IF_SERIAL;
-	grb_info_ptr->param.d_format = D_FMT_YCBCR422;
-	grb_info_ptr->param.std_out = STD_CLR_SD;
-	grb_info_ptr->param.alpha = 255;
-	set_input_format( grb_info_ptr );
+	//grb->video_dev.vfl_dir	= VFL_DIR_M2M;
+	//grb->video_dev.tvnorms = V4L2_STD_ATSC_8_VSB + V4L2_STD_ATSC_16_VSB;
 
-	grb_set_default_fmt(grb_info_ptr);
+	grb->param.sync = SYNC_EXTERNAL;
+	grb->param.std_in = STD_CLR_SD;
+	grb->param.v_if = V_IF_SERIAL;
+	grb->param.d_format = D_FMT_YCBCR422;
+	grb->param.std_out = STD_CLR_SD;
+	grb->param.alpha = 255;
+	set_input_format( grb );
 
-	grb_info_ptr->cropping.left = 0;
-	grb_info_ptr->cropping.top = 0;
-	grb_info_ptr->cropping.width = 1;
-	grb_info_ptr->cropping.height = 1;
+	grb_set_default_fmt(grb, &fmt_default);
 
-	grb_info_ptr->media_dev.dev = grb_info_ptr->dev;
-	strscpy(grb_info_ptr->media_dev.model, "RCM Video Capture Device",
-		sizeof(grb_info_ptr->media_dev.model));
-	grb_info_ptr->media_dev.hw_revision = 0;
+	set_output_format( grb );
 
-	media_device_init(&grb_info_ptr->media_dev);
+	grb->cropping.left = 0;
+	grb->cropping.top  = 0;
+	grb->cropping.width  = grb->format.fmt.pix.width;
+	grb->cropping.height = grb->format.fmt.pix.height;
 
-	grb_info_ptr->v4l2_dev.mdev = &grb_info_ptr->media_dev;
+	grb->media_dev.dev = grb->dev;
+	strscpy(grb->media_dev.model, "RCM Video Capture Device",
+		sizeof(grb->media_dev.model));
+	grb->media_dev.hw_revision = 0;
 
-	err = v4l2_device_register( grb_info_ptr->dev, &grb_info_ptr->v4l2_dev );
+	media_device_init(&grb->media_dev);
+
+	grb->v4l2_dev.mdev = &grb->media_dev;
+
+	err = v4l2_device_register( grb->dev, &grb->v4l2_dev );
 	if (err) {
-		dev_err( grb_info_ptr->dev, "failed v4l2_device register %d\n", err );
+		dev_err( grb->dev, "failed v4l2_device register %d\n", err );
 		goto err_media_clean;
 	}
-	grb_info_ptr->video_dev.v4l2_dev = &grb_info_ptr->v4l2_dev;
-	grb_info_ptr->video_dev.device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_STREAMING;
+	grb->video_dev.v4l2_dev = &grb->v4l2_dev;
+	grb->video_dev.device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_STREAMING;
 
-	grb_info_ptr->pad.flags = MEDIA_PAD_FL_SINK;
-	err = media_entity_pads_init(&grb_info_ptr->video_dev.entity, 1, &grb_info_ptr->pad);
+	grb->pad.flags = MEDIA_PAD_FL_SINK;
+	err = media_entity_pads_init(&grb->video_dev.entity, 1, &grb->pad);
 	if (err) {
-		dev_err( grb_info_ptr->dev, "failed media pad init %d\n", err );
+		dev_err( grb->dev, "failed media pad init %d\n", err );
 		goto err_release_dev;
 	}
 
-	err = v4l2_ctrl_handler_init(&grb_info_ptr->hdl, 5);
+	err = v4l2_ctrl_handler_init(&grb->hdl, 5);
 	if (err) {
 		goto err_release_dev;
 	}
 
-	v4l2_ctrl_new_custom(&grb_info_ptr->hdl, &grb_sync, NULL);
-	v4l2_ctrl_new_custom(&grb_info_ptr->hdl, &grb_stdin, NULL);
-	v4l2_ctrl_new_custom(&grb_info_ptr->hdl, &grb_dvif, NULL);
-	v4l2_ctrl_new_custom(&grb_info_ptr->hdl, &grb_dformat, NULL);
-	v4l2_ctrl_new_custom(&grb_info_ptr->hdl, &grb_stdout, NULL);
-	grb_info_ptr->v4l2_dev.ctrl_handler = &grb_info_ptr->hdl;
+	v4l2_ctrl_new_custom(&grb->hdl, &grb_sync, NULL);
+	v4l2_ctrl_new_custom(&grb->hdl, &grb_stdin, NULL);
+	v4l2_ctrl_new_custom(&grb->hdl, &grb_dvif, NULL);
+	v4l2_ctrl_new_custom(&grb->hdl, &grb_dformat, NULL);
+	v4l2_ctrl_new_custom(&grb->hdl, &grb_stdout, NULL);
+	grb->v4l2_dev.ctrl_handler = &grb->hdl;
 
-	if (grb_info_ptr->hdl.error) {
-		err = grb_info_ptr->hdl.error;
-		dev_err(grb_info_ptr->dev, "Failed to add ctrl\n");
-		goto err_release_dev;
+	if (grb->hdl.error) {
+		err = grb->hdl.error;
+		dev_err(grb->dev, "Failed to add ctrl\n");
+		goto err_free_ctrl;
 	}
 
-	v4l2_ctrl_handler_setup(&grb_info_ptr->hdl);
+	v4l2_ctrl_handler_setup(&grb->hdl);
 
-	video_set_drvdata( &grb_info_ptr->video_dev , grb_info_ptr );
-//	err = video_register_device( &grb_info_ptr->video_dev, VFL_TYPE_GRABBER, -1 );
+	video_set_drvdata( &grb->video_dev , grb );
+//	err = video_register_device( &grb->video_dev, VFL_TYPE_GRABBER, -1 );
 //	if( err ) {
-//		dev_err( grb_info_ptr->dev, "failed video_dev register %d\n", err );
+//		dev_err( grb->dev, "failed video_dev register %d\n", err );
 //		goto err_release_dev;
 //	}
 
-	err = request_irq( grb_info_ptr->num_irq, irq_handler, IRQF_SHARED, RCM_GRB_DEVICE_NAME, grb_info_ptr );
-	if( err ) {
-		dev_err( grb_info_ptr->dev, "request_irq %u isn't availiable\n", grb_info_ptr->num_irq );
-		goto err_release_dev;
-	}
+	/* buffer queue */
+	q->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	q->io_modes = VB2_MMAP;
+	q->lock = &grb->lock;
+	q->drv_priv = grb;
+	q->buf_struct_size = sizeof(struct frame_buffer);
+	q->ops = &grb_video_qops;
+	q->mem_ops = &vb2_dma_contig_memops;
+	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
+	q->min_buffers_needed = 2;
+	q->dev = &pdev->dev;
 
-	err = test_interrupt( grb_info_ptr );
-	if( err ) {
-		dev_err( grb_info_ptr->dev, "test interrupt failed\n" );
-		goto err_release_dev;
-	}
-
-	err = grb_graph_init(grb_info_ptr);
+	err = vb2_queue_init(q);
 	if (err < 0) {
-		dev_err( grb_info_ptr->dev, "graph init failed\n" );
-		goto err_release_dev;
+		dev_err(&pdev->dev, "failed to initialize VB2 queue\n");
+		goto err_free_ctrl;
 	}
 
-	spin_lock_init( &grb_info_ptr->irq_lock );
+	irq = platform_get_irq(pdev, 0);
+	if (irq < 0) {
+		err = irq;
+		goto err_vb2_queue;
+	}
 
-	dev_info( grb_info_ptr->dev, "probe succesfully completed (base %08x)\n", (u32)grb_info_ptr->phys_addr_regs_grb );
+	err = devm_request_irq(&pdev->dev, irq, irq_handler, IRQF_SHARED, RCM_GRB_DEVICE_NAME, grb);
+	if (err) {
+		dev_err(&pdev->dev, "Unable to request irq %d\n", irq);
+		goto err_dev_irq;
+	}
+	grb->irq = irq;
 
-	base_addr = grb_info_ptr->base_addr_regs_grb;
-	dump_all_regs("Dump regs after probe", base_addr);
 
+	err = test_interrupt(grb);
+	if( err ) {
+		dev_err(&pdev->dev, "test interrupt failed\n");
+		goto err_dev_irq;
+	}
+
+	err = grb_graph_init(grb);
+	if (err < 0) {
+		dev_err(&pdev->dev, "graph init failed\n");
+		goto err_graph_init;
+	}
+
+	dev_info(&pdev->dev, "probe succesfully completed (base %08x)\n", (u32)grb->phys_addr_regs);
 	return 0;
 
+err_dev_irq:
+err_graph_init:
+err_vb2_queue:
+	vb2_queue_release(&grb->queue);
+err_free_ctrl:
+	v4l2_ctrl_handler_free(&grb->hdl);
 err_release_dev:
-	v4l2_ctrl_handler_free(&grb_info_ptr->hdl);
-	video_unregister_device( &grb_info_ptr->video_dev ); 
+	video_unregister_device( &grb->video_dev ); 
 err_media_clean:
-	media_device_cleanup(&grb_info_ptr->media_dev);
-err_free_mem:
-	kfree( grb_info_ptr );
+	media_device_cleanup(&grb->media_dev);
+err_free_mutex:
+	mutex_destroy(&grb->lock);
 	return err;
 }
 
-static int device_remove( struct platform_device* grb_device )
+static int device_remove( struct platform_device* pdev )
 {
-	struct grb_info* grb_info_ptr;
+	struct grb_info* grb;
+	grb = platform_get_drvdata(pdev);
 
-	GRB_DBG_PRINT( "In grabber_remove function : %p\n", grb_device )
+	dev_info(&pdev->dev, "grabber removed (base %08x)\n", (u32)grb->phys_addr_regs);
 
-	grb_info_ptr = platform_get_drvdata(grb_device);
-	reset_grab( grb_info_ptr->base_addr_regs_grb );
+	reset_grab( grb->regs );
 
-	v4l2_ctrl_handler_free(&grb_info_ptr->hdl);
-	video_unregister_device( &grb_info_ptr->video_dev );
-	media_device_unregister(&grb_info_ptr->media_dev);
-	media_device_cleanup(&grb_info_ptr->media_dev);
-
-	if( grb_info_ptr->num_irq )
-		free_irq( grb_info_ptr->num_irq, grb_info_ptr );
-
-	if(  grb_info_ptr )
-		kfree( grb_info_ptr );
-
+	v4l2_ctrl_handler_free(&grb->hdl);
+	video_unregister_device( &grb->video_dev );
+	media_device_unregister(&grb->media_dev);
+	vb2_queue_release(&grb->queue);
+	mutex_destroy(&grb->lock);
+	media_device_cleanup(&grb->media_dev);
 	return 0;
 }
 
@@ -2104,8 +2044,8 @@ static struct of_device_id grb_match[] =
 static struct platform_driver module_grb_driver =
 {
 	.driver = {
-		.owner	= THIS_MODULE,
-		.name = "grabber",
+		.owner = THIS_MODULE,
+		.name = RCM_GRB_MODULE_NAME,
 		.of_match_table = grb_match
 	},
 	.probe	= device_probe	,

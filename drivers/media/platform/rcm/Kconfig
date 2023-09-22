@@ -25,9 +25,8 @@ config RCM_VDU_GRABBER
 	depends on VIDEO_V4L2_SUBDEV_API
 	depends on MEDIA_CONTROLLER
 	bool "RCM VDU grabber driver"
-	select VIDEOBUF_GEN
-	select VIDEOBUF_DMA_CONTIG
-	select VIDEOBUF_VMALLOC
+	select VIDEOBUF2_DMA_CONTIG
+	select VIDEOBUF2_VMALLOC
 	select VIDEO_ADV_DEBUG
 	select V4L2_FWNODE
 	default n
