@@ -287,11 +287,6 @@ struct grb_info {
 	struct vb2_v4l2_buffer	*current_buf[RCM_GRB_MAX_FRAME];
 	unsigned int 			reqv_buf_cnt;
 
-//	struct videobuf_queue videobuf_queue_grb;
-//	struct videobuf_buffer* cur_buf;
-//	struct list_head buffer_queue;
-//	unsigned int next_buf_num;
-	//wait_queue_head_t wait_queue;
 	struct completion cmpl;
 	spinlock_t irq_lock;
 	unsigned int irq;
