@@ -964,6 +964,9 @@ static int tc358748_enable_csi_to_parallel(struct v4l2_subdev *sd)
 
 
 #if 1
+	/* Clear previous error */
+	tc358748_write(bridge, CSISTATUS_REG, 0xffff);
+	tc358748_write(bridge, CTLERRCNT_REG, 0);
 
 	/*=========== PLL,Clock Setting ===========*/
 	err = tc358748_write(bridge, PLLCTL0_REG, 0x309F); //PLL Control Register 0 (PLL_PRD,PLL_FBD)
