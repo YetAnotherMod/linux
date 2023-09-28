@@ -32,6 +32,52 @@
 	(ADV7511_INT1_CEC_TX_READY | ADV7511_INT1_CEC_TX_ARBIT_LOST | \
 	 ADV7511_INT1_CEC_TX_RETRY_TIMEOUT | ADV7511_INT1_CEC_RX_READY1)
 
+/* CEC frequency setup */
+enum {
+	ADV7511_CEC_FREQ_12MHZ = 12000000,
+	ADV7511_CEC_FREQ_25MHZ = 25000000,
+};
+
+/* 25MHz CEC clock */
+static const struct reg_sequence cec_25Mhz_regs[] = {
+	{0x51, 0x0D},
+	{0x52, 0x51},
+	{0x53, 0x0C},
+	{0x54, 0x6E},
+	{0x55, 0x0E},
+	{0x56, 0x34},
+	{0x57, 0x0A},
+	{0x58, 0xF3},
+	{0x59, 0x0A},
+	{0x5A, 0x10},
+	{0x5B, 0x0B},
+	{0x5C, 0xD6},
+	{0x5D, 0x07},
+	{0x5E, 0x1A},
+	{0x5F, 0x05},
+	{0x60, 0xC5},
+	{0x61, 0x08},
+	{0x62, 0x6F},
+	{0x63, 0x01},
+	{0x64, 0xC7},
+	{0x65, 0x04},
+	{0x66, 0x70},
+	{0x67, 0x05},
+	{0x68, 0x54},
+	{0x69, 0x03},
+	{0x6A, 0x1B},
+	{0x6B, 0x0A},
+	{0x6C, 0xA7},
+	{0x6E, 0x00},
+	{0x6F, 0xBD},
+	{0x71, 0x00},
+	{0x72, 0xE3},
+	{0x73, 0x02},
+	{0x74, 0xAA},
+	{0x75, 0x03},
+	{0x76, 0x8D},
+};
+
 static void adv_cec_tx_raw_status(struct adv7511 *adv7511, u8 tx_raw_status)
 {
 	unsigned int offset = adv7511->type == ADV7533 ?
@@ -330,6 +376,24 @@ int adv7511_cec_init(struct device *dev, struct adv7511 *adv7511)
 	regmap_write(adv7511->regmap_cec,
 		     ADV7511_REG_CEC_CLK_DIV + offset,
 		     ((adv7511->cec_clk_freq / 750000) - 1) << 2);
+
+	if (adv7511->cec_clk_freq == ADV7511_CEC_FREQ_12MHZ) {
+		dev_info(dev, "12 MHz default CEC clock used\n");
+	}
+	else if (adv7511->cec_clk_freq == ADV7511_CEC_FREQ_25MHZ) {
+		dev_info(dev, "25 MHz CEC clock used\n");
+		ret = regmap_register_patch(adv7511->regmap_cec,
+					    cec_25Mhz_regs,
+					    ARRAY_SIZE(cec_25Mhz_regs));
+		if(ret)
+			dev_err(dev, "Adjusting timing register failed\n");
+
+	} else {
+		dev_err(dev, "Unknown CEC clock\n");
+		ret = -1;
+	}
+	if (ret)
+		goto err_cec_alloc;
 
 	ret = cec_register_adapter(adv7511->cec_adap, dev);
 	if (ret)
