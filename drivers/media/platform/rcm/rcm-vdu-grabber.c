@@ -1647,12 +1647,12 @@ static irqreturn_t proc_interrupt (struct grb_info *grb) {
 
 		set_register( INT_BIT_END_WRITE, base_addr, ADDR_INT_STATUS );
 
-		if (list_empty(&grb->buf_list)) {
-			GRB_DBG_PRINT( "irq_handler: next buffer 0\n" );
-			clr_register( INT_BIT_END_WRITE, base_addr, ADDR_INT_MASK );
-			write_register( 0, base_addr, ADDR_ENABLE );
-			return IRQ_HANDLED;
-		}
+//		if (list_empty(&grb->buf_list)) {
+//			GRB_DBG_PRINT( "irq_handler: next buffer 0\n" );
+//			clr_register( INT_BIT_END_WRITE, base_addr, ADDR_INT_MASK );
+//			write_register( 0, base_addr, ADDR_ENABLE );
+//			return IRQ_HANDLED;
+//		}
 
 		switch_page = grb->sequence & 1;
 
