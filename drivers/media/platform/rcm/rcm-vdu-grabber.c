@@ -128,6 +128,34 @@ static void print_v4l2_pix_format( struct v4l2_pix_format* fmt ) {
 }
 
 /*
+static void print_videobuf_queue_param( struct videobuf_queue* queue, unsigned int num ) {
+	unsigned int i=0 ;
+	struct videobuf_dma_contig_memory* mem;
+	struct videobuf_buffer* vb;
+	for( i=0; i<num; i++ ) {
+		vb = queue->bufs[i];		// buffer ptr
+		if( vb ) {
+			mem = vb->priv;			// memory area
+			GRB_DBG_PRINT( "videobuf_buffer(%u): memory=%u,vaddr=0x%x,dma_handle=0x%x,size=0x%lx: %*ph\n",
+						   i, vb->memory, (u32)mem->vaddr, (u32)mem->dma_handle, mem->size, 16, mem->vaddr )
+		}
+	}
+}
+
+static void print_videobuf_queue_param2( struct videobuf_queue* queue, int num, int off0, int off1, int off2 ) {
+	struct videobuf_dma_contig_memory* mem;
+	struct videobuf_buffer* vb = queue->bufs[num];
+	if( vb ) {
+		u32 p0, p1, p2;
+		mem = vb->priv;
+		p0 = (u32)(mem->vaddr+off0), p1 = (u32)(mem->vaddr+off1), p2 = (u32)(mem->vaddr+off2);
+		GRB_DBG_PRINT( "videobuf_buffer: memory=%u,vaddr=0x%x,dma_handle=0x%x,size=0x%lx:\n%08x:%*ph\n%08x:%*ph\n%08x:%*ph\n",
+				 	   vb->memory, (u32)mem->vaddr, (u32)mem->dma_handle, mem->size,
+					   p0, 8, (void*)p0, p1, 8, (void*)p1, p2, 8, (void*)p2 )
+	} 
+}
+*/
+/*
 static void print_four_cc( const char* info, unsigned int f ) {
 	GRB_DBG_PRINT( "%s: '%c%c%c%c'", info, (u8)(f>>0), (u8)(f>>8), (u8)(f>>16), (u8)(f>>24) );
 }
@@ -148,8 +176,12 @@ static void print_v4l2_format( const char* info, int arg, const struct v4l2_form
 					f->fmt.pix.field, f->fmt.pix.bytesperline, f->fmt.pix.sizeimage, f->fmt.pix.colorspace,f->fmt.pix.priv, f->fmt.pix.flags,
 					f->fmt.pix.ycbcr_enc, f->fmt.pix.quantization, f->fmt.pix.xfer_func );
 }
-
-
+/*
+static void print_v4l2_buffer( const char* info, const struct v4l2_buffer* b ) {
+	GRB_DBG_PRINT( "%s: index=0x%x,type=0x%x,bytesused=0x%x,flags=0x%x,field=0x%x,sequence=0x%x,memory=0x%x,offset=0x%x,length=0x%x\n",
+					info, b->index, b->type, b->bytesused, b->flags, b->field, b->sequence, b->memory, b->m.offset, b->length )
+}
+*/
 static inline void write_register( u32 val, void __iomem *addr, u32 offset ) {
 	iowrite32( val, addr + offset );
 }
@@ -571,6 +603,7 @@ int setup_registers( struct grb_info *grb ) {
 	GRB_DBG_PRINT( "y_hor_size=%d,y_ver_size=%d,c_hor_size=%d,c_ver_size=%d,y_full_size=%d,c_full_size=%d,mem_offset1=%d,mem_offset2=%d,alpha=%d\n",
 			 y_hor_size, y_ver_size, c_hor_size, c_ver_size, y_full_size, c_full_size,
 			 grb->mem_offset1, grb->mem_offset2, grb->param.alpha );
+	//print_videobuf_queue_param( &grb_info_ptr->videobuf_queue_grb, 2 ); 						// print vaddr,dma_handle,size for each buffer
 
 	grb->sequence = 0;
 
@@ -1662,6 +1695,7 @@ static irqreturn_t proc_interrupt (struct grb_info *grb) {
 		}
 
 		GRB_DBG_PRINT( "irq_handler: sequence = %d; switch_page = %d\n", grb->sequence - 1, switch_page );
+		//print_videobuf_queue_param2( &grb_info_ptr->videobuf_queue_grb, grb_info_ptr->frame_count-1, 0, grb_info_ptr->mem_offset1/*-4*/, grb_info_ptr->mem_offset2/*-4*/ );
 
 	}
 	else if( rd_data & INT_BIT_DONE ) {
