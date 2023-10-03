@@ -1009,11 +1009,11 @@ static int device_open( struct file *file ) {
 		goto unlock;
 	}
 
-	ret = v4l2_subdev_call(sd, core, s_power, 1);
-	if (ret < 0 && ret != -ENOIOCTLCMD){
-		dev_err(grb->dev, "Error power up subdev\n");
-		goto fh_rel;
-	}
+//	ret = v4l2_subdev_call(sd, core, s_power, 1);
+//	if (ret < 0 && ret != -ENOIOCTLCMD){
+//		dev_err(grb->dev, "Error power up subdev\n");
+//		goto fh_rel;
+//	}
 
 //	drv_vidioc_auto_detect( grb, NULL );
 
