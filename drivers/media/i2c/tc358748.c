@@ -977,26 +977,25 @@ static int tc358748_enable_csi_to_parallel(struct v4l2_subdev *sd)
 #if 1
 	/* Clear previous error */
 	tc358748_write(bridge, CSISTATUS_REG, 0xffff);
-	tc358748_write(bridge, CTLERRCNT_REG, 0);
 
 	/*=========== PLL,Clock Setting ===========*/
-	err = tc358748_write(bridge, PLLCTL0_REG, 0x309F); //PLL Control Register 0 (PLL_PRD,PLL_FBD)
+	err = tc358748_write(bridge, PLLCTL0_REG, 0x209F); //PLL Control Register 0 (PLL_PRD,PLL_FBD)
 	if (err) {
 		dev_err(dev, "unable to set PLLCTL0.\n");
 		return err;
 	}
-	err = tc358748_write(bridge, PLLCTL1_REG, 0x0C03); //PLL_FRS,PLL_LBWS, PLL oscillation enable
+	err = tc358748_write(bridge, PLLCTL1_REG, 0x1003); //PLL_FRS,PLL_LBWS, PLL oscillation enable
 	if (err) {
 		dev_err(dev, "unable to set PLLCTL1.\n");
 		return err;
 	}
 	fsleep(1000);
-	err = tc358748_write(bridge, PLLCTL1_REG, 0x0C13); //PLL_FRS,PLL_LBWS, PLL clock out enable
+	err = tc358748_write(bridge, PLLCTL1_REG, 0x1013); //PLL_FRS,PLL_LBWS, PLL clock out enable
 	if (err) {
 		dev_err(dev, "unable to set PLLCTL1.\n");
 		return err;
 	}
-	err = tc358748_write(bridge, CLKCTL_REG, 0x0021); //CLK control register: Clock divider setting
+	err = tc358748_write(bridge, CLKCTL_REG, 0x0022); //CLK control register: Clock divider setting
 	if (err) {
 		dev_err(dev, "unable to set CLKCTL.\n");
 		return err;
@@ -1014,7 +1013,7 @@ static int tc358748_enable_csi_to_parallel(struct v4l2_subdev *sd)
 	/*=========== Format configuration, timing Setting ===========*/
 
 	/* After activating the remote device, we will start the auto-calibration */
-	val = 0x8010;
+	val = 0x8004;
 	dev_dbg(dev, "PHYTIMDLY: 0x%x\n", val);
 	err = tc358748_write(bridge, PHYTIMDLY_REG, val); //PHY timing delay setting
 	if (err) {
@@ -1023,7 +1022,7 @@ static int tc358748_enable_csi_to_parallel(struct v4l2_subdev *sd)
 	}
 
 	//val = bridge->vb_size / 32;
-	val = 0x0100;
+	val = 0x80;
 	dev_dbg(dev, "FIFOCTL: %u (0x%x)\n", val, val);
 	err = tc358748_write(bridge, FIFOCTL_REG, val); //FIFO control
 	if (err) {
@@ -1560,6 +1559,21 @@ static int tc358748_g_dv_timings(struct v4l2_subdev *sd,
 	return v4l2_subdev_call(remote, video, g_dv_timings, timings);
 }
 
+//static int tc358748_s_ctrl(struct v4l2_ctrl *ctrl)
+//{
+//	return 0;
+//}
+
+//static int tc358748_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
+//{
+//	return 0;
+//}
+
+//static const struct v4l2_ctrl_ops tc358748_ctrl_ops = {
+//	.s_ctrl = tc358748_s_ctrl,
+//	.g_volatile_ctrl = tc358748_g_volatile_ctrl,
+//};
+
 static const struct v4l2_subdev_core_ops tc358748_core_ops = {
 #ifdef CONFIG_VIDEO_ADV_DEBUG
 	.g_register = tc358748_g_register,
@@ -1591,31 +1605,24 @@ static const struct media_entity_operations tc358748_subdev_entity_ops = {
 
 static int tc358748_init_controls(struct tc358748_dev *bridge)
 {
-	u64 *link_frequencies = bridge->tx.link_frequencies;
-	struct v4l2_ctrl *ctrl;
+//	u64 *link_frequencies = bridge->tx.link_frequencies;
+//	struct v4l2_ctrl *ctrl;
 	int err;
 
-	err = v4l2_ctrl_handler_init(&bridge->ctrl_hdl, 1);
+	err = v4l2_ctrl_handler_init(&bridge->ctrl_hdl, 0);
 	if (err)
 		return err;
 
-	/*
-	 * The driver currently supports only one link-frequency, regardless of
-	 * the input from the firmware, see: tc358748_init_output_port(). So
-	 * report only the first frequency from the array of possible given
-	 * frequencies.
-	 */
-	ctrl = v4l2_ctrl_new_int_menu(&bridge->ctrl_hdl, NULL,
-				      V4L2_CID_LINK_FREQ, 0, 0,
-				      link_frequencies);
-	if (ctrl)
-		ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+//	ctrl = v4l2_ctrl_new_int_menu(ctrl_hdl, &tc358748_ctrl_ops, V4L2_CID_LINK_FREQ,
+//			       0, 0, link_frequencies);
+//	if (ctrl)
+//		ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 
-	err = bridge->ctrl_hdl.error;
-	if (err) {
-		v4l2_ctrl_handler_free(&bridge->ctrl_hdl);
-		return err;
-	}
+//	err = bridge->ctrl_hdl.error;
+//	if (err) {
+//		v4l2_ctrl_handler_free(&bridge->ctrl_hdl);
+//		return err;
+//	}
 
 	bridge->sd.ctrl_handler = &bridge->ctrl_hdl;
 
