@@ -300,7 +300,7 @@ static const struct imx219_reg mode_3280x2464_regs[] = {
 	{0x011A, 0x00}, // THS_PREPARE[8]
 	{0x011B, 0x2F}, // THS_PREPARE[7:0]
 	{0x011C, 0x00}, // THS_ZERO_MIN[8]
-	{0x011D, 0x57}, // THS_ZERO_MIN[7:0]
+	{0x011D, 0x70}, // THS_ZERO_MIN[7:0]
 
 	{0x0164, 0x00},
 	{0x0165, 0x00},
@@ -325,7 +325,7 @@ static const struct imx219_reg mode_1920_1080_regs[] = {
 	{0x011A, 0x00}, // THS_PREPARE[8]
 	{0x011B, 0x2F}, // THS_PREPARE[7:0]
 	{0x011C, 0x00}, // THS_ZERO_MIN[8]
-	{0x011D, 0x57}, // THS_ZERO_MIN[7:0]
+	{0x011D, 0x70}, // THS_ZERO_MIN[7:0]
 
 	{0x0164, 0x02},
 	{0x0165, 0xa8},
@@ -350,7 +350,7 @@ static const struct imx219_reg mode_1640_1232_regs[] = {
 	{0x011A, 0x00}, // THS_PREPARE[8]
 	{0x011B, 0x2F}, // THS_PREPARE[7:0]
 	{0x011C, 0x00}, // THS_ZERO_MIN[8]
-	{0x011D, 0x57}, // THS_ZERO_MIN[7:0]
+	{0x011D, 0x70}, // THS_ZERO_MIN[7:0]
 
 	{0x0164, 0x00},
 	{0x0165, 0x00},
@@ -373,9 +373,9 @@ static const struct imx219_reg mode_1640_1232_regs[] = {
 static const struct imx219_reg mode_640_480_regs[] = {
 
 	{0x011A, 0x00}, // THS_PREPARE[8]
-	{0x011B, 0xC8}, // THS_PREPARE[7:0]
+	{0x011B, 0x2F}, // THS_PREPARE[7:0]
 	{0x011C, 0x00}, // THS_ZERO_MIN[8]
-	{0x011D, 0x64}, // THS_ZERO_MIN[7:0]
+	{0x011D, 0x70}, // THS_ZERO_MIN[7:0]
 
 
 	// Frame Length: 569
@@ -1407,7 +1407,7 @@ static int imx219_init_controls(struct imx219 *imx219)
 	/* By default, PIXEL_RATE is read only */
 	imx219->pixel_rate = v4l2_ctrl_new_std(ctrl_hdlr, &imx219_ctrl_ops,
 					       V4L2_CID_PIXEL_RATE,
-					       IMX219_PIXEL_RATE,
+					       0,
 					       IMX219_PIXEL_RATE, 1,
 					       IMX219_PIXEL_RATE);
 
