@@ -993,7 +993,7 @@ static int drv_vidioc_auto_detect( struct grb_info *grb, void *arg );
 
 static int device_open( struct file *file ) {
 	struct grb_info *grb = video_drvdata( file) ;
-	struct v4l2_subdev *sd = grb->entity.subdev;
+//	struct v4l2_subdev *sd = grb->entity.subdev;
 	int ret;
 
 	dev_dbg( grb->dev, "Open video4linux2 device. Name: %s, base: %x \n" ,
@@ -1019,7 +1019,7 @@ static int device_open( struct file *file ) {
 
 //	v4l2_subdev_call(sd, core, s_power, 0);
 
-fh_rel:
+//fh_rel:
 	if (ret)
 		v4l2_fh_release(file);
 unlock:
