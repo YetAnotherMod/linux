@@ -4,6 +4,8 @@
  *
  */
 
+//#define DEBUG 1
+
 #include <linux/bitfield.h>
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
@@ -50,6 +52,9 @@
 #define		PDFMT(val)		FIELD_PREP(GENMASK(7, 4), (val))
 #define		UDT_EN			BIT(0)
 
+#define GPIOEN_REG			0x000E
+#define GPIODIR_REG			0x0010
+
 #define MCLKCTL_REG			0x000c
 #define		MCLK_HIGH_MASK	GENMASK(15, 8)
 #define		MCLK_LOW_MASK	GENMASK(7, 0)
@@ -80,6 +85,11 @@
 #define PP_MISC_REG			0x0032
 #define		FRMSTOP			BIT(15)
 #define		RSTPTR			BIT(14)
+
+#define DBG_ACT_LINE_CNT   0x00E0
+#define DBG_LINE_WIDTH     0x00E2
+#define DBG_VERT_BLANK_LINE_CNT     0x00E4
+#define DBG_VIDEO_DATA     0x00E8
 
 
 #define PHYCLKCTL_REG		0x0056
@@ -118,10 +128,13 @@
 #define CLW_CNTRL_REG			0x0140
 #define D0W_CNTRL_REG			0x0144
 #define		LANEDISABLE		BIT(0)
+#define D1W_CNTRL_REG			0x0148
+#define D2W_CNTRL_REG			0x014C
 
 #define STARTCNTRL_REG			0x0204
 #define		START			BIT(0)
 
+#define PPISTATUS_REG			0x0208
 #define LINEINITCNT_REG			0x0210
 #define LPTXTIMECNT_REG			0x0214
 #define TCLK_HEADERCNT_REG		0x0218
@@ -152,6 +165,9 @@
 
 #define CSI_START_REG			0x0518
 #define		STRT			BIT(0)
+
+//#undef MCLK_ENABLE
+#define MCLK_ENABLE
 
 static const struct v4l2_mbus_framefmt tc358748_def_sink_fmt = {
 	.width		= 640,
@@ -201,13 +217,16 @@ struct tc358748_dev {
 	struct v4l2_async_notifier notifier;
 
 	struct clk *refclk;
+	unsigned long refclk_freq;
 	struct gpio_desc *reset_gpio;
 	struct regulator_bulk_data supplies[TC358748_NUM_SUPPLIES];
 
+#ifdef MCLK_ENABLE
 	struct clk_hw	mclk_hw;
 	unsigned long	mclk_rate;
 	u8				mclk_prediv;
 	u16				mclk_postdiv;
+#endif // MCLK_ENABLE
 
 	unsigned long	pll_rate;
 	u8				pll_post_div;
@@ -424,10 +443,12 @@ static inline struct tc358748_dev *to_tc358748_dev(struct v4l2_subdev *sd)
 	return container_of(sd, struct tc358748_dev, sd);
 }
 
+#ifdef MCLK_ENABLE
 static inline struct tc358748_dev *clk_hw_to_tc358748(struct clk_hw *hw)
 {
 	return container_of(hw, struct tc358748_dev, mclk_hw);
 }
+#endif // MCLK_ENABLE
 
 static inline void fsleep(unsigned long usecs)
 {       
@@ -618,7 +639,7 @@ static int tc358748_apply_sw_reset(struct tc358748_dev *bridge)
 	if (err)
 		return err;
 
-	fsleep(10);
+	fsleep(100);
 
 	return tc358748_clear_bits(bridge, SYSCTL_REG, SRESET);
 }
@@ -627,20 +648,13 @@ static int tc358748_apply_sw_reset(struct tc358748_dev *bridge)
 static int tc358748_set_power_on(struct tc358748_dev *bridge)
 {
 	struct device *dev = bridge->sd.dev;
-	int ret;
+	int ret = 0;
 
-	ret = clk_prepare_enable(bridge->refclk);
-	if (ret) {
-		dev_err(dev, "%s: failed to enable clock\n", __func__);
-		return ret;
-	}
-
-	ret = regulator_bulk_enable(TC358748_NUM_SUPPLIES,
-				    bridge->supplies);
-	if (ret) {
-		dev_err(dev, "%s: failed to enable regulators\n", __func__);
-		goto refclk_off;
-	}
+//	ret = regulator_bulk_enable(TC358748_NUM_SUPPLIES, bridge->supplies);
+//	if (ret) {
+//		dev_err(dev, "%s: failed to enable regulators\n", __func__);
+//		return ret;
+//	}
 
 	if (bridge->reset_gpio) {
 		dev_dbg(dev, "apply reset");
@@ -650,21 +664,14 @@ static int tc358748_set_power_on(struct tc358748_dev *bridge)
 		ret = tc358748_apply_sw_reset(bridge);
 		if (ret) {
 			dev_err(dev, "%s: failed to apply sw reset\n", __func__);
-			goto refclk_off;
 		}
 	}
-
-	return 0;
-
-refclk_off:
-	clk_disable_unprepare(bridge->refclk);
 	return ret;
 }
 
 static void tc358748_set_power_off(struct tc358748_dev *bridge)
 {
-	regulator_bulk_disable(TC358748_NUM_SUPPLIES, bridge->supplies);
-	clk_disable_unprepare(bridge->refclk);
+//	regulator_bulk_disable(TC358748_NUM_SUPPLIES, bridge->supplies);
 }
 
 static int tc358748_detect(struct tc358748_dev *bridge)
@@ -807,6 +814,7 @@ static unsigned long tc358748_find_pll_settings(struct tc358748_dev *bridge,
 	return best_freq;
 }
 
+#ifdef MCLK_ENABLE
 static int tc358748_mclk_enable(struct tc358748_dev *bridge)
 {
 	unsigned int div;
@@ -831,7 +839,9 @@ static int tc358748_mclk_enable(struct tc358748_dev *bridge)
 
 	return tc358748_update_bits(bridge, CLKCTL_REG, MCLKDIV_MASK, val);
 }
+#endif // MCLK_ENABLE
 
+#ifdef MCLK_ENABLE
 static long tc358748_find_mclk_settings(struct tc358748_dev *bridge, unsigned long mclk_rate)
 {
 	unsigned long pll_rate = bridge->pll_rate;
@@ -921,6 +931,7 @@ out:
 
 	return best_mclk_rate;
 }
+#endif // MCLK_ENABLE
 
 static int tc358748_enable_csi_to_parallel(struct v4l2_subdev *sd)
 {
@@ -991,12 +1002,14 @@ static int tc358748_enable_csi_to_parallel(struct v4l2_subdev *sd)
 		return err;
 	}
 
+#ifdef MCLK_ENABLE
 	/*=========== MCLK Output ===========*/
 	err = tc358748_write(bridge, MCLKCTL_REG, 0x0101); //MCLK duty setting
 	if (err) {
 		dev_err(dev, "unable to set MCLKCTL.\n");
 		return err;
 	}
+#endif // MCLK_ENABLE
 
 	/*=========== Format configuration, timing Setting ===========*/
 
@@ -1036,7 +1049,53 @@ static int tc358748_enable_csi_to_parallel(struct v4l2_subdev *sd)
 		dev_err(dev, "unable to set CONFCTL.\n");
 		return err;
 	}
-	return 0;
+	return tc358748_write(bridge, CTLERRCNT_REG, 0);
+
+    /*
+    tc358748_write(bridge, DBG_ACT_LINE_CNT, 0x8000);
+	tc358748_write(bridge, DBG_LINE_WIDTH, 0x396); // 918
+	tc358748_write(bridge, DBG_VERT_BLANK_LINE_CNT, 0x0000);
+*/
+    //int i = 0;
+	/*
+	for (i = 0; i < 400; i++)
+    {
+//		tc358748_write(bridge, DBG_VIDEO_DATA, 0x1612)
+//		tc358748_write(bridge, DBG_VIDEO_DATA, 0x2c22);
+		tc358748_write(bridge, DBG_VIDEO_DATA, 0x5832);
+    }
+	tc358748_write(bridge, DBG_ACT_LINE_CNT, 0xC1e0);
+*/
+/*
+	for (i = 0; i < 80; i++)
+		tc358748_write(bridge, DBG_VIDEO_DATA, 0xff7f);
+	tc358748_write(bridge, DBG_VIDEO_DATA, 0xff00);
+
+	for (i = 0; i < 40; i++)
+		tc358748_write(bridge, DBG_VIDEO_DATA, 0xffff);
+	tc358748_write(bridge, DBG_VIDEO_DATA, 0xc0ff);
+	
+    for (i = 0; i < 40; i++)
+		tc358748_write(bridge, DBG_VIDEO_DATA, 0xc000);
+	
+    for (i = 0; i < 80; i++)
+		tc358748_write(bridge, DBG_VIDEO_DATA, 0x7f00);
+	
+    for (i = 0; i < 80; i++)
+		tc358748_write(bridge, DBG_VIDEO_DATA, 0x7fff);
+	tc358748_write(bridge, DBG_VIDEO_DATA, 0x0000);
+	
+    for (i = 0; i < 40; i++)
+		tc358748_write(bridge, DBG_VIDEO_DATA, 0x00ff);
+	tc358748_write(bridge, DBG_VIDEO_DATA, 0x00ff);
+	
+    for (i = 0; i < 40; i++)
+		tc358748_write(bridge, DBG_VIDEO_DATA, 0x0000);
+	tc358748_write(bridge, DBG_VIDEO_DATA, 0x007f);
+
+	tc358748_write(bridge, DBG_ACT_LINE_CNT, 0xC1DF);
+
+*/
 
 #else
 
@@ -1048,11 +1107,13 @@ static int tc358748_enable_csi_to_parallel(struct v4l2_subdev *sd)
 		return err;
 	}
 
+#ifdef MCLK_ENABLE
 	err = tc358748_mclk_enable(bridge);
 	if (err) {
 		dev_err(dev, "unable to apply mclk settings.\n");
 		return err;
 	}
+#endif // MCLK_ENABLE
 
 	val = bridge->vb_size / 32;
 	dev_dbg(dev, "FIFOCTL: %u (0x%x)\n", val, val);
@@ -1162,7 +1223,7 @@ static int tc358748_status(struct tc358748_dev *bridge)
 	u32 rxdata;
 
 	/* Default to 30ms */
-	wait = 5000;
+	wait = 100;
 	msleep(wait); /* In order to receive some packets */
 
 	dev_dbg(dev, "====================\n");
@@ -1203,6 +1264,42 @@ static int tc358748_status(struct tc358748_dev *bridge)
 	dev_dbg(dev, "MDLERRCNT=0x%X\n", rxdata);
 	tc358748_read(bridge, FIFOSTATUS_REG, &rxdata);
 	dev_dbg(dev, "FIFOSTATUS=0x%X\n", rxdata);
+	tc358748_read(bridge, PP_MISC_REG, &rxdata);
+	dev_dbg(dev, "PP_MISC_REG=0x%X\n", rxdata);
+
+	tc358748_read(bridge, 0x00E0, &rxdata);
+	dev_dbg(dev, "(DBG_LCNT=0x%X\n", rxdata);
+	tc358748_read(bridge, 0x00E2, &rxdata);
+	dev_dbg(dev, "DBG_Width=0x%X\n", rxdata);
+	tc358748_read(bridge, 0x00E4, &rxdata);
+	dev_dbg(dev, "DBG_VBlank=0x%X\n", rxdata);
+	tc358748_read(bridge, 0x00E8, &rxdata);
+	dev_dbg(dev, "DBG_Data=0x%X\n", rxdata);
+
+	tc358748_read(bridge, CLW_CNTRL_REG, &rxdata);
+	dev_dbg(dev, "CLW_CNTRL_REG=0x%X\n", rxdata);
+	tc358748_read(bridge, D0W_CNTRL_REG, &rxdata);
+	dev_dbg(dev, "D0W_CNTRL_REG=0x%X\n", rxdata);
+	tc358748_read(bridge, D1W_CNTRL_REG, &rxdata);
+	dev_dbg(dev, "D1W_CNTRL_REG=0x%X\n", rxdata);
+	tc358748_read(bridge, D2W_CNTRL_REG, &rxdata);
+	dev_dbg(dev, "D2W_CNTRL_REG=0x%X\n", rxdata);
+
+	tc358748_read(bridge, STARTCNTRL_REG, &rxdata);
+	dev_dbg(dev, "STARTCNTRL_REG=0x%X\n", rxdata);
+	tc358748_read(bridge, PPISTATUS_REG, &rxdata);
+	dev_dbg(dev, "PPISTATUS_REG=0x%X\n", rxdata);
+
+	tc358748_read(bridge, MCLKCTL_REG, &rxdata);
+	dev_dbg(dev, "MCLKCTL_REG=0x%X\n", rxdata);
+	tc358748_read(bridge, 0xE, &rxdata); // GPIOEn
+	dev_dbg(dev, "GPIOEn=0x%X\n", rxdata);
+	tc358748_read(bridge, 0x10, &rxdata); // GPIO Direction Register
+	dev_dbg(dev, "GPIODIR=0x%X\n", rxdata);
+	tc358748_read(bridge, 0x12, &rxdata); // GPIO Direction Register
+	dev_dbg(dev, "GPIO Pin Value=0x%X\n", rxdata);
+	tc358748_read(bridge, 0x14, &rxdata); // GPIO Direction Register
+	dev_dbg(dev, "GPIO Output Value=0x%X\n", rxdata);
 
 	dev_dbg(dev, "====================\n");
 
@@ -1453,13 +1550,6 @@ tc358748_s_register(struct v4l2_subdev *sd, const struct v4l2_dbg_register *reg)
 	return 0;
 }
 
-static const struct v4l2_subdev_core_ops tc358748_core_ops = {
-#ifdef CONFIG_VIDEO_ADV_DEBUG
-	.g_register = tc358748_g_register,
-	.s_register = tc358748_s_register,
-#endif
-};
-
 static int tc358748_g_dv_timings(struct v4l2_subdev *sd,
 				  struct v4l2_dv_timings *timings)
 {
@@ -1469,6 +1559,13 @@ static int tc358748_g_dv_timings(struct v4l2_subdev *sd,
 	/* Ask the remote directly */
 	return v4l2_subdev_call(remote, video, g_dv_timings, timings);
 }
+
+static const struct v4l2_subdev_core_ops tc358748_core_ops = {
+#ifdef CONFIG_VIDEO_ADV_DEBUG
+	.g_register = tc358748_g_register,
+	.s_register = tc358748_s_register,
+#endif
+};
 
 static const struct v4l2_subdev_video_ops tc358748_video_ops = {
 	.s_stream = tc358748_s_stream,
@@ -1607,7 +1704,7 @@ static int tc358748_parse_tx_ep(struct tc358748_dev *bridge)
 		goto error_fwnode;
 	}
 
-	refclk = clk_get_rate(bridge->refclk);
+	refclk = bridge->refclk_freq;
 	csi_link_rate = (unsigned long)vep->link_frequencies[0];
 
 	bridge->pll_rate = tc358748_find_pll_settings(bridge, refclk, csi_link_rate * 2);
@@ -1687,8 +1784,9 @@ static int tc358748_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct tc358748_dev *bridge;
-	u32 clk_freq;
+#ifdef MCLK_ENABLE
 	u32 mclk_freq;
+#endif // MCLK_ENABLE
 	int ret;
 
 	bridge = devm_kzalloc(dev, sizeof(*bridge), GFP_KERNEL);
@@ -1705,7 +1803,9 @@ static int tc358748_probe(struct i2c_client *client)
 	bridge->refclk = devm_clk_get(dev, "refclk");
 	if (IS_ERR(bridge->refclk)) {
 		dev_err(dev, "failed to get refclk\n");
-		return PTR_ERR(bridge->refclk);
+		ret = PTR_ERR(bridge->refclk);
+		bridge->refclk = NULL;
+		return ret;
 	}
 
 	ret = clk_prepare_enable(bridge->refclk);
@@ -1714,16 +1814,17 @@ static int tc358748_probe(struct i2c_client *client)
 		return ret;
 	}
 
-	clk_freq = clk_get_rate(bridge->refclk);
-	clk_disable_unprepare(bridge->refclk);
+	bridge->refclk_freq = clk_get_rate(bridge->refclk);
 
-	if (clk_freq < 6 * HZ_PER_MHZ || clk_freq > 40 * HZ_PER_MHZ) {
-		dev_err(dev, "refclk freq must be in 6-40 Mhz range. got %d Hz\n", clk_freq);
+	if (bridge->refclk_freq < 6 * HZ_PER_MHZ ||
+	    bridge->refclk_freq > 40 * HZ_PER_MHZ) {
+		dev_err(dev,
+			"refclk freq must be in 6-40 Mhz range. got %ld Hz\n",
+			bridge->refclk_freq);
 		return -EINVAL;
 	}
 
-	bridge->reset_gpio = devm_gpiod_get_optional(dev, "reset",
-						     GPIOD_OUT_HIGH);
+	bridge->reset_gpio = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
 
 	if (IS_ERR(bridge->reset_gpio)) {
 		dev_err(dev, "failed to get reset GPIO\n");
@@ -1778,11 +1879,13 @@ static int tc358748_probe(struct i2c_client *client)
 	if (ret)
 		goto unregister_notifier;
 
+#ifdef MCLK_ENABLE
 	if (of_property_read_u32(client->dev.of_node, "mclk-rate", &mclk_freq)) {
 		dev_err(&client->dev, "Not found mclk-rate property in device-tree\n");
 		return -EINVAL;
 	}
 	tc358748_find_mclk_settings(bridge, mclk_freq);
+#endif // MCLK_ENABLE
 
 	if (of_property_read_u8(client->dev.of_node, "hsync-active", &bridge->hsync_active)) {
 		bridge->hsync_active = 1;
@@ -1802,6 +1905,13 @@ static int tc358748_probe(struct i2c_client *client)
 	dev_info(dev, "%s found @ 0x%x (%s)\n", client->name,
 						client->addr, client->adapter->name);
 
+	{
+		u32 rxdata;
+		tc358748_read(bridge, THS_HEADERCNT_REG, &rxdata); // THS_ZEROCNT[6:0]: THS_PREPARECNT[6:0]
+		dev_dbg(dev, "THS_HEADERCNT_REG(%X)=0x%X\n", THS_HEADERCNT_REG, rxdata);
+		tc358748_read(bridge, TCLK_TRAILCNT_REG, &rxdata); // TCLKTRAILCNT[7:0]
+		dev_dbg(dev, "TCLK_TRAILCNT_REG(%X)=0x%X\n", TCLK_TRAILCNT_REG, rxdata);
+	}
 	return 0;
 
 unregister_notifier:
