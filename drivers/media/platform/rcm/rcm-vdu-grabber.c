@@ -1457,7 +1457,7 @@ static int grb_s_ctrl(struct v4l2_ctrl *ctrl)
 	return 0;
 }
 
-static int grb_s_volatile_ctrl(struct v4l2_ctrl *ctrl)
+static int grb_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct grb_info *grb =
 		container_of(ctrl->handler, struct grb_info, hdl);
@@ -1493,7 +1493,7 @@ static int grb_s_volatile_ctrl(struct v4l2_ctrl *ctrl)
 
 static const struct v4l2_ctrl_ops grb_ctrl_ops = {
 	.s_ctrl 			= grb_s_ctrl,
-	.g_volatile_ctrl	= grb_s_volatile_ctrl,
+	.g_volatile_ctrl	= grb_g_volatile_ctrl,
 };
 
 static const struct v4l2_ctrl_config grb_sync = {
