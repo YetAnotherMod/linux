@@ -34,6 +34,7 @@
 
 #define SYSCTL_REG			0x0002
 #define		SRESET			BIT(0)
+#define 	SLEEP 			BIT(1)
 
 #define CONFCTL_REG			0x0004
 #define		PDATAF_MASK		GENMASK(9, 8)
@@ -975,6 +976,14 @@ static int tc358748_enable_csi_to_parallel(struct v4l2_subdev *sd)
 
 
 #if 1
+
+	/* Set normal operation */
+	err = tc358748_clear_bits(bridge, SYSCTL_REG, SLEEP);
+	if (err) {
+		dev_err(dev, "unable to set SYSCTL.\n");
+		return err;
+	}
+
 	/* Clear previous error */
 	tc358748_write(bridge, CSISTATUS_REG, 0xffff);
 
@@ -1043,7 +1052,7 @@ static int tc358748_enable_csi_to_parallel(struct v4l2_subdev *sd)
 		dev_err(dev, "unable to set DATAFMT.\n");
 		return err;
 	}
-	err = tc358748_write(bridge, CONFCTL_REG, 0x8045); //Configuration control
+	err = tc358748_write(bridge, CONFCTL_REG, 0x0045); //Configuration control
 	if (err) {
 		dev_err(dev, "unable to set CONFCTL.\n");
 		return err;
