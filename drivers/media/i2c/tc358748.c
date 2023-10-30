@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0
+
 /*
- * Driver for Toshiba TC358748 CSI-2 to PARALLEL bridge
+ * Driver for Toshiba TC358748 CSI-2 IN to PARALLEL OUT bridge
  *
  */
-
-//#define DEBUG 1
 
 #include <linux/bitfield.h>
 #include <linux/clk.h>
@@ -55,6 +54,8 @@
 
 #define GPIOEN_REG			0x000E
 #define GPIODIR_REG			0x0010
+#define GPIOIN_REG			0x0012
+#define GPIOOUT_REG			0x0014
 
 #define MCLKCTL_REG			0x000c
 #define		MCLK_HIGH_MASK	GENMASK(15, 8)
@@ -76,22 +77,17 @@
 #define		PLL_EN			BIT(0)
 
 #define CLKCTL_REG			0x0020
+#define 	PPICLKDIV_MASK	GENMASK(5,4)
+#define		PPICLKDIV(val)	FIELD_PREP(PPICLKDIV_MASK, (val))
 #define		MCLKDIV_MASK	GENMASK(3, 2)
 #define		MCLKDIV(val)	FIELD_PREP(MCLKDIV_MASK, (val))
-#define		MCLKDIV_8		0
-#define		MCLKDIV_4		1
-#define		MCLKDIV_2		2
+#define		PCLKDIV_MASK	GENMASK(1,0)
+#define		PCLKDIV(val)	FIELD_PREP(PCLKDIV_MASK, (val))
+#define		DIV_8			0
+#define		DIV_4			1
+#define		DIV_2			2
 
 #define WORDCNT_REG			0x0022
-#define PP_MISC_REG			0x0032
-#define		FRMSTOP			BIT(15)
-#define		RSTPTR			BIT(14)
-
-#define DBG_ACT_LINE_CNT   0x00E0
-#define DBG_LINE_WIDTH     0x00E2
-#define DBG_VERT_BLANK_LINE_CNT     0x00E4
-#define DBG_VIDEO_DATA     0x00E8
-
 
 #define PHYCLKCTL_REG		0x0056
 #define PHYDATA0CTL_REG		0x0058
@@ -104,11 +100,11 @@
 #define		DSETTLE_MASK	GENMASK(6, 0)
 #define		DSETTLE(val)	FIELD_PREP(DSETTLE_MASK, (val))
 
-#define PHYSTA_REG			0x0062
+#define PHYSTA_REG		0x0062
 #define CSISTATUS_REG		0x0064
 #define CSIERREN_REG		0x0066
 #define MDLSYNERR_REG		0x0068
-#define CSIDID_REG			0x006A
+#define CSIDID_REG		0x006A
 #define CSIDIDERR_REG		0x006C
 #define CSIPKTLEN_REG		0x006E
 #define CSIRX_DPCTL_REG		0x0070
@@ -124,54 +120,11 @@
 #define MDLERRCNT_REG		0x0090
 #define FIFOSTATUS_REG		0x00F8
 
-/* 32-bit registers */
-#define CLW_DPHYCONTTX_REG		0x0100
-#define CLW_CNTRL_REG			0x0140
-#define D0W_CNTRL_REG			0x0144
-#define		LANEDISABLE		BIT(0)
-#define D1W_CNTRL_REG			0x0148
-#define D2W_CNTRL_REG			0x014C
-
-#define STARTCNTRL_REG			0x0204
-#define		START			BIT(0)
-
-#define PPISTATUS_REG			0x0208
-#define LINEINITCNT_REG			0x0210
-#define LPTXTIMECNT_REG			0x0214
-#define TCLK_HEADERCNT_REG		0x0218
-#define		TCLK_ZEROCNT(val)	FIELD_PREP(GENMASK(15, 8), (val))
-#define		TCLK_PREPARECNT(val)	FIELD_PREP(GENMASK(6, 0), (val))
-
-#define TCLK_TRAILCNT_REG		0x021C
-#define THS_HEADERCNT_REG		0x0220
-#define		THS_ZEROCNT(val)	FIELD_PREP(GENMASK(14, 8), (val))
-#define		THS_PREPARECNT(val)	FIELD_PREP(GENMASK(6, 0), (val))
-
-#define TWAKEUP_REG			0x0224
-#define TCLK_POSTCNT_REG		0x0228
-#define THS_TRAILCNT_REG		0x022C
-#define HSTXVREGEN_REG			0x0234
-#define TXOPTIONCNTRL_REG		0x0238
-#define CSI_CONTROL_REG			0x040C
-#define		CSI_MODE		BIT(15)
-#define		TXHSMD			BIT(7)
-#define		NOL(val)		FIELD_PREP(GENMASK(2, 1), (val))
-
-#define CSI_CONFW_REG			0x0500
-#define		MODE(val)		FIELD_PREP(GENMASK(31, 29), (val))
-#define		MODE_SET		0x5
-#define		ADDRESS(val)		FIELD_PREP(GENMASK(28, 24), (val))
-#define		CSI_CONTROL_ADDRESS	0x3
-#define		DATA(val)		FIELD_PREP(GENMASK(15, 0), (val))
-
-#define CSI_START_REG			0x0518
-#define		STRT			BIT(0)
-
 //#undef MCLK_ENABLE
 #define MCLK_ENABLE
 
 static const struct v4l2_mbus_framefmt tc358748_def_sink_fmt = {
-	.width		= 640,
+	.width		= (640/3)*3 + 640%3, // X_rx = X_tx * 3 = 214 * 3 = 642 ?
 	.height		= 480,
 	.code		= MEDIA_BUS_FMT_SRGGB8_1X8,
 	.field		= V4L2_FIELD_NONE,
@@ -182,7 +135,7 @@ static const struct v4l2_mbus_framefmt tc358748_def_sink_fmt = {
 };
 
 static const struct v4l2_mbus_framefmt tc358748_def_source_fmt = {
-	.width		= 640,
+	.width		= (640 + 2) / 3, // X_tx = (((640 + 2)/3 + 1)/2)*2 = 214 ?
 	.height		= 480,
 	.code		= MEDIA_BUS_FMT_RGB888_1X24,
 	.field		= V4L2_FIELD_NONE,
@@ -199,8 +152,8 @@ static const char * const tc358748_supply_name[] = {
 #define TC358748_NUM_SUPPLIES		ARRAY_SIZE(tc358748_supply_name)
 
 enum {
-	TC358748_SINK,
-	TC358748_SOURCE,
+	TC358748_SINK, // Input - CSI Rx (Camera SRC, get format auto from stream) 
+	TC358748_SOURCE, // Output - Parallel Tx (Grabber DST, set fotmat manual to capture)
 	TC358748_NR_PADS
 };
 
@@ -213,6 +166,7 @@ struct tc358748_dev {
 	/* endpoints info */
 	struct v4l2_fwnode_endpoint tx;
 	struct v4l2_fwnode_endpoint rx;
+
 	/* remote source */
 	struct v4l2_async_subdev asd;
 	struct v4l2_async_notifier notifier;
@@ -225,24 +179,28 @@ struct tc358748_dev {
 #ifdef MCLK_ENABLE
 	struct clk_hw	mclk_hw;
 	unsigned long	mclk_rate;
-	u8				mclk_prediv;
-	u16				mclk_postdiv;
+	u8		mclk_prediv;
+	u16		mclk_postdiv;
 #endif // MCLK_ENABLE
 
 	unsigned long	pll_rate;
-	u8				pll_post_div;
-	u16				pll_pre_div;
-	u16				pll_mul;
+	u8		pll_post_div;
+	u16		pll_pre_div;
+	u16		pll_mul;
+
+	u8		ppi_div;
+	u8		par_div;
 
 	struct i2c_client *i2c_client;
 
 	/* lock to protect all members below */
 	struct mutex lock;
+
 	struct v4l2_mbus_framefmt sink_fmt;
 	struct v4l2_mbus_framefmt source_fmt;
 
 #define TC358748_VB_MAX_SIZE		(511 * 32)
-#define TC358748_VB_DEFAULT_SIZE	 (32 * 32)
+#define TC358748_VB_DEFAULT_SIZE	 (4 * 32)
 	unsigned int	vb_size; /* Video buffer size in bits */
 
 	u8	hsync_active;
@@ -251,10 +209,10 @@ struct tc358748_dev {
 
 #define notifier_to_tc358748(n) container_of(n, struct tc358748_dev, notifier)
 
-
 struct tc358748_format {
 	u32		code;
-	bool 	csi_format;
+	bool		par_fmt;
+	unsigned char	bus_width;
 	unsigned char	bpp;
 	/* Register values */
 	u8		pdformat; /* Peripheral Data Format */
@@ -275,113 +233,59 @@ enum {
 	PDFORMAT_YUV444,
 };
 
-/* Check tc358748_src_mbus_code() if you add new formats */
+/* Check tc358748_mbus_par_code() if you add new formats */
 static const struct tc358748_format tc358748_formats[] = {	
-	{
+	{ // 0
 		.code = MEDIA_BUS_FMT_SBGGR8_1X8,
+		.bus_width = 8,
 		.bpp = 8,
 		.pdformat = PDFORMAT_RAW8,
 		.pdataf = PDATAF_MODE0, /* don't care */
-	}, {
+	},
+	{ // 1
 		.code = MEDIA_BUS_FMT_SGBRG8_1X8,
+		.bus_width = 8,
 		.bpp = 8,
 		.pdformat = PDFORMAT_RAW8,
 		.pdataf = PDATAF_MODE0, /* don't care */
-	}, {
+	},
+	{ // 2
 		.code = MEDIA_BUS_FMT_SGRBG8_1X8,
+		.bus_width = 8,
 		.bpp = 8,
 		.pdformat = PDFORMAT_RAW8,
 		.pdataf = PDATAF_MODE0, /* don't care */
-	}, {
+	},
+	{ // 3
 		.code = MEDIA_BUS_FMT_SRGGB8_1X8,
+		.bus_width = 8,
 		.bpp = 8,
 		.pdformat = PDFORMAT_RAW8,
 		.pdataf = PDATAF_MODE0, /* don't care */
-	}, {
-		.code = MEDIA_BUS_FMT_SBGGR10_1X10,
-		.bpp = 10,
-		.pdformat = PDFORMAT_RAW10,
-		.pdataf = PDATAF_MODE0, /* don't care */
-	}, {
-		.code = MEDIA_BUS_FMT_SGBRG10_1X10,
-		.bpp = 10,
-		.pdformat = PDFORMAT_RAW10,
-		.pdataf = PDATAF_MODE0, /* don't care */
-	}, {
-		.code = MEDIA_BUS_FMT_SGRBG10_1X10,
-		.bpp = 10,
-		.pdformat = PDFORMAT_RAW10,
-		.pdataf = PDATAF_MODE0, /* don't care */
-	}, {
-		.code = MEDIA_BUS_FMT_SRGGB10_1X10,
-		.bpp = 10,
-		.pdformat = PDFORMAT_RAW10,
-		.pdataf = PDATAF_MODE0, /* don't care */
-	}, {
-		.code = MEDIA_BUS_FMT_SBGGR12_1X12,
-		.bpp = 12,
-		.pdformat = PDFORMAT_RAW12,
-		.pdataf = PDATAF_MODE0, /* don't care */
-	}, {
-		.code = MEDIA_BUS_FMT_SGBRG12_1X12,
-		.bpp = 12,
-		.pdformat = PDFORMAT_RAW12,
-		.pdataf = PDATAF_MODE0, /* don't care */
-	}, {
-		.code = MEDIA_BUS_FMT_SGRBG12_1X12,
-		.bpp = 12,
-		.pdformat = PDFORMAT_RAW12,
-		.pdataf = PDATAF_MODE0, /* don't care */
-	}, {
-		.code = MEDIA_BUS_FMT_SRGGB12_1X12,
-		.bpp = 12,
-		.pdformat = PDFORMAT_RAW12,
-		.pdataf = PDATAF_MODE0, /* don't care */
-	}, {
-		.code = MEDIA_BUS_FMT_SBGGR14_1X14,
-		.bpp = 14,
-		.pdformat = PDFORMAT_RAW14,
-		.pdataf = PDATAF_MODE0, /* don't care */
-	}, {
-		.code = MEDIA_BUS_FMT_SGBRG14_1X14,
-		.bpp = 14,
-		.pdformat = PDFORMAT_RAW14,
-		.pdataf = PDATAF_MODE0, /* don't care */
-	}, {
-		.code = MEDIA_BUS_FMT_SGRBG14_1X14,
-		.bpp = 14,
-		.pdformat = PDFORMAT_RAW14,
-		.pdataf = PDATAF_MODE0, /* don't care */
-	}, {
-		.code = MEDIA_BUS_FMT_SRGGB14_1X14,
-		.bpp = 14,
-		.pdformat = PDFORMAT_RAW14,
-		.pdataf = PDATAF_MODE0, /* don't care */
-	}, {
-		.code = MEDIA_BUS_FMT_RGB888_1X24,
+	},
+	{ // 4
+		.code = MEDIA_BUS_FMT_RGB888_1X24, // 0
+		.bus_width = 24,
+		.par_fmt = true,
 		.bpp = 24,
 		.pdformat = PDFORMAT_RGB888,
 		.pdataf = PDATAF_MODE0, /* don't care */
-	}, {
-		.code = MEDIA_BUS_FMT_UYVY8_2X8, //
-		.bpp = 16,
-		.pdformat = PDFORMAT_YUV422_8BIT,
-		.pdataf = PDATAF_MODE0,
-	}, {
-		.code = MEDIA_BUS_FMT_UYVY8_1X16, //
+	},
+	{ // 5
+		.code = MEDIA_BUS_FMT_UYVY8_1X16, // 1
+		.bus_width = 16,
+		.par_fmt = true,
 		.bpp = 16,
 		.pdformat = PDFORMAT_YUV422_8BIT,
 		.pdataf = PDATAF_MODE1,
-	}, {
-		.code = MEDIA_BUS_FMT_YUYV8_1X16, //
+	},
+	{ // 6
+		.code = MEDIA_BUS_FMT_YUYV8_1X16, // 2
+		.bus_width = 16,
+		.par_fmt = true,
 		.bpp = 16,
 		.pdformat = PDFORMAT_YUV422_8BIT,
 		.pdataf = PDATAF_MODE2,
-	}, {
-		.code = MEDIA_BUS_FMT_UYVY10_2X10, //
-		.bpp = 20,
-		.pdformat = PDFORMAT_YUV422_10BIT,
-		.pdataf = PDATAF_MODE0, /* don't care */
 	}
 };
 
@@ -395,8 +299,8 @@ tc358748_get_format_by_idx(unsigned int pad, unsigned int index)
 	for (i = 0; i < ARRAY_SIZE(tc358748_formats); i++) {
 		const struct tc358748_format *fmt = &tc358748_formats[i];
 
-		if ((pad == TC358748_SINK) ||
-		    (pad == TC358748_SOURCE)) {
+		if ((pad == TC358748_SOURCE && fmt->par_fmt) ||
+		    (pad == TC358748_SINK)) {
 			if (idx == index)
 				return fmt;
 			idx++;
@@ -414,11 +318,11 @@ tc358748_get_format_by_code(unsigned int pad, u32 code)
 	for (i = 0; i < ARRAY_SIZE(tc358748_formats); i++) {
 		const struct tc358748_format *fmt = &tc358748_formats[i];
 
-//		if (pad == TC358748_SOURCE && fmt->code == code)
-//			return fmt;
+		if (pad == TC358748_SINK && fmt->code == code)
+			return fmt;
 
-//		if (pad == TC358748_SINK && !fmt->csi_format)
-//			continue;
+		if (pad == TC358748_SOURCE && !fmt->par_fmt)
+			continue;
 
 		if (fmt->code == code)
 			return fmt;
@@ -427,16 +331,31 @@ tc358748_get_format_by_code(unsigned int pad, u32 code)
 	return ERR_PTR(-EINVAL);
 }
 
-static u32 tc358748_src_mbus_code(u32 code)
+static u32 tc358748_mbus_par_code(u32 mbus_csi_code)
 {
-	switch (code) {
-	case MEDIA_BUS_FMT_UYVY8_2X8:
-		return MEDIA_BUS_FMT_UYVY8_1X16;
-	case MEDIA_BUS_FMT_UYVY10_2X10:
-		return MEDIA_BUS_FMT_UYVY10_1X20;
+	switch (mbus_csi_code) {
+	case MEDIA_BUS_FMT_SBGGR8_1X8:
+	case MEDIA_BUS_FMT_SRGGB8_1X8:
+	case MEDIA_BUS_FMT_SGBRG8_1X8:
+	case MEDIA_BUS_FMT_SGRBG8_1X8:
+		return MEDIA_BUS_FMT_RGB888_1X24;
 	default:
-		return code;
+		return mbus_csi_code;
 	}
+}
+
+static u32 tc358748_mbus_csi_code(u32 code)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(tc358748_formats); i++) {
+		const struct tc358748_format *fmt = &tc358748_formats[i];
+
+		if (code == fmt->code)
+			return code;
+	}
+
+	return tc358748_formats[0].code;
 }
 
 static inline struct tc358748_dev *to_tc358748_dev(struct v4l2_subdev *sd)
@@ -466,7 +385,6 @@ static int tc358748_read(struct tc358748_dev *bridge, u16 reg, u32 *val)
 	struct i2c_client *client = bridge->i2c_client;
 	int ret;
 	__be16 data16;
-	__be32 data32;
 
 	data16 = cpu_to_be16(reg);
 	ret = i2c_master_send(client, (char *)&data16, 2);
@@ -476,19 +394,18 @@ static int tc358748_read(struct tc358748_dev *bridge, u16 reg, u32 *val)
 			return ret < 0 ? ret : -EIO;
 	}
 
-	if (reg < CLW_DPHYCONTTX_REG) {
-			ret = i2c_master_recv(client, (char *)&data16, 2);
-			*val = be16_to_cpu(data16);
-	} else {
-			ret = i2c_master_recv(client, (char *)&data32, 4);
-			*val = __swahw32(be32_to_cpu(data32));
-	}
+
+	ret = i2c_master_recv(client, (char *)&data16, 2);
+	*val = be16_to_cpu(data16);
 
 	if (ret < 1) {
 			dev_err(&client->dev, "%s: i2c read error, reg: 0x%x\n",
 					__func__, reg);
 			return ret < 0 ? ret : -EIO;
 	}
+
+printk("TC358748 R: addr(0x%x), reg%d (0x%x), val%d (0x%x).\n", client->addr, 2, reg, 2, *val);
+
 	return 0;
 }
 
@@ -496,31 +413,23 @@ static int tc358748_write(struct tc358748_dev *bridge, u16 reg, u32 val)
 {
 	struct i2c_client *client = bridge->i2c_client;
 	int ret;
-	int size;
 	__be16 data16;
-	char data[6];
+	char data[4];
 
 	data16 = cpu_to_be16(reg);
-	memcpy(data, &data16, sizeof(data16));
-	size = sizeof(data16);
-	if (reg < CLW_DPHYCONTTX_REG) {
-			data16 = cpu_to_be16(val);
-			memcpy(data + size, &data16, sizeof(data16));
-			size += sizeof(data16);
-	} else {
-			data16 = cpu_to_be16(val & 0xffff);
-			memcpy(data + size, &data16, sizeof(data16));
-			size += sizeof(data16);
-			data16 = cpu_to_be16(val >> 16);
-			memcpy(data + size, &data16, sizeof(data16));
-			size += sizeof(data16);
-	}
-	ret = i2c_master_send(client, data, size);
-	if (ret < size) {
+	memcpy(data, &data16, 2);
+
+	data16 = cpu_to_be16(val);
+	memcpy(data + 2, &data16, 2);
+
+	ret = i2c_master_send(client, data, 4);
+	if (ret < 4) {
 			dev_err(&client->dev, "%s: i2c write error, reg: 0x%x\n",
 					__func__, reg);
 			return ret < 0 ? ret : -EIO;
 	}
+
+printk("TC358748 W: addr(0x%x), reg%d (0x%x), val%d (0x%x).\n", client->addr, 2, reg, 2, val);
 			
 	return 0;
 }               
@@ -558,16 +467,10 @@ static struct v4l2_subdev *tc358748_get_remote_sd(struct v4l2_subdev *sd)
 	struct media_pad    *r_pad;
 	struct v4l2_subdev  *r_sd;
 
-	if(!bridge) {
+	if(!bridge)
 		return NULL;
-	}
-
-	if(&bridge->pads[TC358748_SINK] == NULL) {
-		return NULL;
-	}
 
 	r_pad = media_entity_remote_pad(&bridge->pads[TC358748_SINK]);
-
 
 	if (r_pad == NULL || !is_media_entity_v4l2_subdev(r_pad->entity)) {
 		dev_err(dev, "Nothing connected to input pad\n");
@@ -581,32 +484,6 @@ static struct v4l2_subdev *tc358748_get_remote_sd(struct v4l2_subdev *sd)
 	}
 
 	return r_sd;
-}
-
-static __u32 get_fmt_code(__u32 code)
-{
-	unsigned int i;
-
-	for (i = 0; i < ARRAY_SIZE(tc358748_formats); i++) {
-		const struct tc358748_format *fmt = &tc358748_formats[i];
-
-		if (code == fmt->code)
-			return code;
-	}
-
-	return tc358748_formats[0].code;
-}
-
-static __u32 serial_to_parallel_code(__u32 serial)
-{
-	switch (serial) {
-	case MEDIA_BUS_FMT_UYVY8_2X8:
-		return MEDIA_BUS_FMT_UYVY8_1X16;
-	case MEDIA_BUS_FMT_UYVY10_2X10:
-		return MEDIA_BUS_FMT_UYVY10_1X20;
-	default:
-		return serial;
-	}
 }
 
 static int tc358748_get_regulators(struct tc358748_dev *bridge)
@@ -704,6 +581,9 @@ static int tc358748_apply_pll_config(struct tc358748_dev *bridge)
 	struct v4l2_subdev *sd = &bridge->sd;
 	struct device *dev = sd->dev;
 
+	u8 ppi_div = bridge->ppi_div;
+	u8 par_div = bridge->par_div;
+
 	u8 post = bridge->pll_post_div;
 	u16 pre = bridge->pll_pre_div;
 	u16 mul = bridge->pll_mul;
@@ -718,6 +598,34 @@ static int tc358748_apply_pll_config(struct tc358748_dev *bridge)
 	if (FIELD_GET(PLL_EN, val) == 1) {
 		dev_dbg(dev, "PLL already running\n");
 		return 0;
+	}
+
+	switch (ppi_div) {
+		case 8:
+			ppi_div = DIV_8;
+			break;
+		case 4:
+			ppi_div = DIV_4;
+			break;
+		case 2:
+			ppi_div = DIV_2;
+			break;
+		default:
+			return -EINVAL;
+	}
+
+	switch (par_div) {
+		case 8:
+			par_div = DIV_8;
+			break;
+		case 4:
+			par_div = DIV_4;
+			break;
+		case 2:
+			par_div = DIV_2;
+			break;
+		default:
+			return -EINVAL;
 	}
 
 	/* Pre-div and Multiplicator have a internal +1 logic */
@@ -735,27 +643,73 @@ static int tc358748_apply_pll_config(struct tc358748_dev *bridge)
 	if (err)
 		return err;
 
+	tc358748_update_bits(bridge, CLKCTL_REG, PPICLKDIV_MASK, PPICLKDIV(ppi_div));
+	tc358748_update_bits(bridge, CLKCTL_REG, PCLKDIV_MASK, PCLKDIV(par_div));
+
 	fsleep(1000);
 
 	return tc358748_set_bits(bridge, PLLCTL1_REG, CKEN);
 }
 
-
-static unsigned long tc358748_find_pll_settings(struct tc358748_dev *bridge,
-						unsigned long refclk, unsigned long fout)
+static int tc358748_find_pll_settings(struct tc358748_dev *bridge, struct v4l2_subdev_format *sd_fmt,
+		const struct tc358748_format *sink_fmt, const struct tc358748_format *source_fmt)
 {
+//	const struct tc358748_format *sink_fmt, *source_fmt;
 	struct device *dev = bridge->sd.dev;
 	unsigned long best_freq = 0;
+	unsigned long fout, pixel_rate;
+	unsigned long refclk, par_clk;
+	unsigned long csi_rate;
+	unsigned char csi_lanes;
 	u32 min_delta = 0xffffffff;
-	u16 prediv_max = 17;
+	u16 prediv_max = 16;
 	u16 prediv_min = 1;
 	u16 m_best, mul;
 	u16 p_best, p;
 	u8 postdiv;
+	unsigned int div[] = {8, 4, 2};
+	int ret, ppi, par;
+
+	csi_lanes = bridge->rx.bus.mipi_csi2.num_data_lanes;
+	csi_rate = (unsigned long)bridge->rx.link_frequencies[0];
+
+	refclk = bridge->refclk_freq;
+
+//	sink_fmt = tc358748_get_format_by_code(TC358748_SINK, bridge->sink_fmt.code);
+//	source_fmt = tc358748_get_format_by_code(TC358748_SOURCE, bridge->source_fmt.code);
+
+#if 0	
+	if (csi_rate > (((72*sourse_fmt->bus_width) / (2*csi_lanes)) * HZ_PER_MHZ))
+		return -EINVAL;
+
+	par_clk = 72 * HZ_PER_MHZ;
+#else
+
+	par_clk = (2*csi_rate*csi_lanes) / source_fmt->bus_width;
+
+	if (par_clk < 66 * HZ_PER_MHZ || par_clk > 100 * HZ_PER_MHZ)
+		return -EINVAL;
+#endif
+
+	for (ppi = 2; ppi >= 0; ppi--) {
+		for (par = 0; par < 3; par++) {
+			unsigned long ppi_clk;
+
+			fout = par_clk * div[par];
+			ppi_clk = fout / div[ppi];
+
+			if (ppi_clk >= par_clk && ppi_clk <= 125 * HZ_PER_MHZ)
+				goto ppi_out;
+		}
+	}
+
+	return -EINVAL;
+
+ppi_out:
 
 	if (fout > 1000 * HZ_PER_MHZ) {
 		dev_err(dev, "HS-Clock above 1 Ghz are not supported\n");
-		return 0;
+		return -EINVAL;
 	}
 
 	if (fout >= 500 * HZ_PER_MHZ)
@@ -772,17 +726,17 @@ static unsigned long tc358748_find_pll_settings(struct tc358748_dev *bridge,
 		u64 tmp;
 
 		fin = DIV_ROUND_CLOSEST(refclk, p);
-		if (fin < 4 * HZ_PER_MHZ || fin > 40 * HZ_PER_MHZ)
+		if (fin < 6 * HZ_PER_MHZ || fin > 40 * HZ_PER_MHZ)
 			continue;
 
-		tmp = fout * p * postdiv;
+		tmp = fout * postdiv;
 		do_div(tmp, fin);
 		mul = tmp;
-		if (mul > 511)
+		if (mul > 512)
 			continue;
 
 		tmp = mul * fin;
-		do_div(tmp, p * postdiv);
+		do_div(tmp, postdiv);
 
 		delta = abs(fout - tmp);
 		if (delta < min_delta) {
@@ -798,21 +752,43 @@ static unsigned long tc358748_find_pll_settings(struct tc358748_dev *bridge,
 
 	if (!best_freq) {
 		dev_err(dev, "Failed find PLL frequency\n");
-		return 0;
+		return -EINVAL;
 	}
 
 	bridge->pll_post_div = postdiv;
 	bridge->pll_pre_div = p_best;
 	bridge->pll_mul = m_best;
 
+	bridge->ppi_div = div[ppi];
+	bridge->par_div = div[par];
+
 	if (best_freq != fout)
 		dev_warn(dev, "Request PLL freq:%lu, found PLL freq:%lu\n",
 			 fout, best_freq);
 
-	dev_dbg(dev, "Found PLL settings: refclk:%lu freq:%lu prediv:%u multi:%u postdiv:%u\n",
-		refclk, best_freq, p_best, m_best, postdiv);
+	bridge->pll_rate = best_freq;
 
-	return best_freq;
+	{
+#define DIV_PRECISION 10
+		unsigned int fifo_size;
+		int n;
+
+		pixel_rate = par_clk * source_fmt->bus_width;
+		csi_rate = 2 * csi_rate * csi_lanes;
+
+		n = pixel_rate / (csi_rate / DIV_PRECISION);
+		fifo_size = (sd_fmt->format.width * DIV_PRECISION) / n;
+		fifo_size = sd_fmt->format.width - fifo_size;
+		fifo_size = fifo_size * sink_fmt->bpp;
+
+		bridge->vb_size = round_up(fifo_size, 32);
+
+		if (bridge->vb_size > TC358748_VB_MAX_SIZE)
+			return -EINVAL;
+#undef DIV_PRECISION
+	}
+
+	return 0;
 }
 
 #ifdef MCLK_ENABLE
@@ -830,11 +806,11 @@ static int tc358748_mclk_enable(struct tc358748_dev *bridge)
 		return err;
 
 	if (bridge->mclk_prediv == 8)
-		val = MCLKDIV(MCLKDIV_8);
+		val = MCLKDIV(DIV_8);
 	else if (bridge->mclk_prediv == 4)
-		val = MCLKDIV(MCLKDIV_4);
+		val = MCLKDIV(DIV_4);
 	else
-		val = MCLKDIV(MCLKDIV_2);
+		val = MCLKDIV(DIV_2);
 
 	dev_dbg(bridge->sd.dev, "CLKCTL[MCLKDIV]: %u (0x%x)\n", val, val);
 
@@ -843,9 +819,10 @@ static int tc358748_mclk_enable(struct tc358748_dev *bridge)
 #endif // MCLK_ENABLE
 
 #ifdef MCLK_ENABLE
-static long tc358748_find_mclk_settings(struct tc358748_dev *bridge, unsigned long mclk_rate)
+static long tc358748_find_mclk_settings(struct tc358748_dev *bridge)
 {
 	unsigned long pll_rate = bridge->pll_rate;
+	unsigned long mclk_rate = bridge->mclk_rate;
 	const unsigned char prediv[] = { 2, 4, 8 };
 	unsigned int mclk_prediv, mclk_postdiv;
 	struct device *dev = bridge->sd.dev;
@@ -873,8 +850,8 @@ static long tc358748_find_mclk_settings(struct tc358748_dev *bridge, unsigned lo
 	 *   MCLK = PLL / (MCLK-PreDiv * 2 * MCLK-PostDiv)
 	 */
 
-	if (mclk_rate == bridge->mclk_rate)
-		return mclk_rate;
+	if (!pll_rate)
+		return 0;
 
 	/* Highest possible rate */
 	mclkdiv = pll_rate / mclk_rate;
@@ -921,7 +898,6 @@ static long tc358748_find_mclk_settings(struct tc358748_dev *bridge, unsigned lo
 out:
 	bridge->mclk_prediv = mclk_prediv;
 	bridge->mclk_postdiv = mclk_postdiv;
-	bridge->mclk_rate = best_mclk_rate;
 
 	if (best_mclk_rate != mclk_rate)
 		dev_warn(dev, "Request MCLK freq:%lu, found MCLK freq:%lu\n",
@@ -938,9 +914,7 @@ static int tc358748_enable_csi_to_parallel(struct v4l2_subdev *sd)
 {
 	struct tc358748_dev *bridge = to_tc358748_dev(sd);
 	struct device *dev = bridge->sd.dev;
-#if 0
 	unsigned int lanes;
-#endif
 	const struct tc358748_format *sink_fmt;
 	const struct tc358748_format *source_fmt;
 	struct v4l2_subdev_format  sd_fmt;
@@ -963,151 +937,26 @@ static int tc358748_enable_csi_to_parallel(struct v4l2_subdev *sd)
 		dev_err(dev, "unable to get fmt from subdev.\n");
 		return err;
 	}
+
 	sink_fmt = tc358748_get_format_by_code(TC358748_SINK, sd_fmt.format.code);
 	if (IS_ERR(sink_fmt)){
 		dev_err(dev, "Unsupported format code 0x%X.\n", sd_fmt.format.code);
 		return PTR_ERR(sink_fmt);
 	}
-	source_fmt = tc358748_get_format_by_code(TC358748_SOURCE, MEDIA_BUS_FMT_RGB888_1X24);
+
+	source_fmt = tc358748_get_format_by_code(TC358748_SOURCE, tc358748_mbus_par_code(sink_fmt->code));
 	if (IS_ERR(source_fmt)){
 		dev_err(dev, "Unsupported format code 0x%X.\n", sd_fmt.format.code);
 		return PTR_ERR(source_fmt);
 	}
 
-
-#if 1
-
-	/* Set normal operation */
-	err = tc358748_clear_bits(bridge, SYSCTL_REG, SLEEP);
-	if (err) {
-		dev_err(dev, "unable to set SYSCTL.\n");
-		return err;
-	}
-
-	/* Clear previous error */
-	tc358748_write(bridge, CSISTATUS_REG, 0xffff);
-
-	/*=========== PLL,Clock Setting ===========*/
-	err = tc358748_write(bridge, PLLCTL0_REG, 0x209F); //PLL Control Register 0 (PLL_PRD,PLL_FBD)
-	if (err) {
-		dev_err(dev, "unable to set PLLCTL0.\n");
-		return err;
-	}
-	err = tc358748_write(bridge, PLLCTL1_REG, 0x1003); //PLL_FRS,PLL_LBWS, PLL oscillation enable
-	if (err) {
-		dev_err(dev, "unable to set PLLCTL1.\n");
-		return err;
-	}
-	fsleep(1000);
-	err = tc358748_write(bridge, PLLCTL1_REG, 0x1013); //PLL_FRS,PLL_LBWS, PLL clock out enable
-	if (err) {
-		dev_err(dev, "unable to set PLLCTL1.\n");
-		return err;
-	}
-	err = tc358748_write(bridge, CLKCTL_REG, 0x0022); //CLK control register: Clock divider setting
-	if (err) {
-		dev_err(dev, "unable to set CLKCTL.\n");
-		return err;
-	}
-
-#ifdef MCLK_ENABLE
-	/*=========== MCLK Output ===========*/
-	err = tc358748_write(bridge, MCLKCTL_REG, 0x0101); //MCLK duty setting
-	if (err) {
-		dev_err(dev, "unable to set MCLKCTL.\n");
-		return err;
-	}
-#endif // MCLK_ENABLE
-
-	/*=========== Format configuration, timing Setting ===========*/
-
-	/* After activating the remote device, we will start the auto-calibration */
-	val = 0x8004;
-	dev_dbg(dev, "PHYTIMDLY: 0x%x\n", val);
-	err = tc358748_write(bridge, PHYTIMDLY_REG, val); //PHY timing delay setting
-	if (err) {
-		dev_err(dev, "unable to set PHYTIMDLY.\n");
-		return err;
-	}
-
-	//val = bridge->vb_size / 32;
-	val = 0x80;
-	dev_dbg(dev, "FIFOCTL: %u (0x%x)\n", val, val);
-	err = tc358748_write(bridge, FIFOCTL_REG, val); //FIFO control
-	if (err) {
-		dev_err(dev, "unable to set FIFOCTL.\n");
-		return err;
-	}
-	
-	val = sd_fmt.format.width * sink_fmt->bpp / 8;
-	dev_dbg(dev, "WORDCNT: %u (0x%x)\n", val, val);
-	err = tc358748_write(bridge, WORDCNT_REG, val); // Total number of bytes for each line/width
-	if (err) {
-		dev_err(dev, "unable to set WORDCNT\n");
-		return err;
-	}
-
-	err = tc358748_write(bridge, DATAFMT_REG, 0x0031); //Data format control
-	if (err) {
-		dev_err(dev, "unable to set DATAFMT.\n");
-		return err;
-	}
-	err = tc358748_write(bridge, CONFCTL_REG, 0x0045); //Configuration control
-	if (err) {
-		dev_err(dev, "unable to set CONFCTL.\n");
-		return err;
-	}
-	return tc358748_write(bridge, CTLERRCNT_REG, 0);
-
-    /*
-    tc358748_write(bridge, DBG_ACT_LINE_CNT, 0x8000);
-	tc358748_write(bridge, DBG_LINE_WIDTH, 0x396); // 918
-	tc358748_write(bridge, DBG_VERT_BLANK_LINE_CNT, 0x0000);
-*/
-    //int i = 0;
-	/*
-	for (i = 0; i < 400; i++)
-    {
-//		tc358748_write(bridge, DBG_VIDEO_DATA, 0x1612)
-//		tc358748_write(bridge, DBG_VIDEO_DATA, 0x2c22);
-		tc358748_write(bridge, DBG_VIDEO_DATA, 0x5832);
-    }
-	tc358748_write(bridge, DBG_ACT_LINE_CNT, 0xC1e0);
-*/
-/*
-	for (i = 0; i < 80; i++)
-		tc358748_write(bridge, DBG_VIDEO_DATA, 0xff7f);
-	tc358748_write(bridge, DBG_VIDEO_DATA, 0xff00);
-
-	for (i = 0; i < 40; i++)
-		tc358748_write(bridge, DBG_VIDEO_DATA, 0xffff);
-	tc358748_write(bridge, DBG_VIDEO_DATA, 0xc0ff);
-	
-    for (i = 0; i < 40; i++)
-		tc358748_write(bridge, DBG_VIDEO_DATA, 0xc000);
-	
-    for (i = 0; i < 80; i++)
-		tc358748_write(bridge, DBG_VIDEO_DATA, 0x7f00);
-	
-    for (i = 0; i < 80; i++)
-		tc358748_write(bridge, DBG_VIDEO_DATA, 0x7fff);
-	tc358748_write(bridge, DBG_VIDEO_DATA, 0x0000);
-	
-    for (i = 0; i < 40; i++)
-		tc358748_write(bridge, DBG_VIDEO_DATA, 0x00ff);
-	tc358748_write(bridge, DBG_VIDEO_DATA, 0x00ff);
-	
-    for (i = 0; i < 40; i++)
-		tc358748_write(bridge, DBG_VIDEO_DATA, 0x0000);
-	tc358748_write(bridge, DBG_VIDEO_DATA, 0x007f);
-
-	tc358748_write(bridge, DBG_ACT_LINE_CNT, 0xC1DF);
-
-*/
-
-#else
-
 	lanes = bridge->rx.bus.mipi_csi2.num_data_lanes;
+
+	err = tc358748_find_pll_settings(bridge, &sd_fmt, sink_fmt, source_fmt);
+	if (err) {
+		dev_err(dev, "unable find available pll settings.\n");
+		return err;
+	}
 
 	err = tc358748_apply_pll_config(bridge);
 	if (err) {
@@ -1116,6 +965,12 @@ static int tc358748_enable_csi_to_parallel(struct v4l2_subdev *sd)
 	}
 
 #ifdef MCLK_ENABLE
+	if (!tc358748_find_mclk_settings(bridge)) {
+		dev_err(dev, "unable find available mclk settings.\n");
+		return -EINVAL;
+	}
+
+
 	err = tc358748_mclk_enable(bridge);
 	if (err) {
 		dev_err(dev, "unable to apply mclk settings.\n");
@@ -1131,8 +986,11 @@ static int tc358748_enable_csi_to_parallel(struct v4l2_subdev *sd)
 		return err;
 	}
 
+	val = sd_fmt.format.width * sink_fmt->bpp / 8;
+	err = tc358748_write(bridge, WORDCNT_REG, val);
+
 	/* Self defined CSI user data type id's are not supported yet */
-	val = PDFMT(fmt->pdformat);
+	val = PDFMT(source_fmt->pdformat);
 	dev_dbg(dev, "DATAFMT: 0x%x\n", val);
 	err = tc358748_write(bridge, DATAFMT_REG, val);
 	if (err) {
@@ -1140,15 +998,14 @@ static int tc358748_enable_csi_to_parallel(struct v4l2_subdev *sd)
 		return err;
 	}
 
-	//CSIRX: use Data Type ID detected from CSI Bus
-	err = tc358748_clear_bits(bridge, DATAFMT_REG, UDT_EN);
+	err = tc358748_set_bits(bridge, DATAFMT_REG, UDT_EN);
 	if (err) {
-		dev_err(dev, "unable to clear UDT_EN in DATAFMT\n");
+		dev_err(dev, "unable to set UDT_EN in DATAFMT\n");
 		return err;
 	}
 
 	/* After activating the remote device, we will start the auto-calibration */
-	err = tc358748_write(bridge, PHYTIMDLY_REG, 0x8009);
+	err = tc358748_write(bridge, PHYTIMDLY_REG, 0x8007);
 	if (err) {
 		dev_err(dev, "unable to set PHYTIMDLY\n");
 		return err;
@@ -1174,8 +1031,8 @@ static int tc358748_enable_csi_to_parallel(struct v4l2_subdev *sd)
 //		return err;
 //	}
 
-	val = PDATAF(fmt->pdataf);
-	dev_dbg(dev, "CONFCTL[PDATAF]: 0x%x\n", fmt->pdataf);
+	val = PDATAF(source_fmt->pdataf);
+	dev_dbg(dev, "CONFCTL[PDATAF]: 0x%x\n", source_fmt->pdataf);
 	err = tc358748_update_bits(bridge, CONFCTL_REG, PDATAF_MASK, val);
 	if (err) {
 		dev_err(dev, "unable to write CONFCTL[PDATAF]\n");
@@ -1213,105 +1070,10 @@ static int tc358748_enable_csi_to_parallel(struct v4l2_subdev *sd)
 		return err;
 	}
 
-	err = tc358748_update_bits(bridge, CONFCTL_REG, DATALANE_MASK, lanes - 1);
-	if (err) {
-		dev_err(dev, "unable to write CONFCTL[DATALANE]\n");
-		return err;
-	}
+	tc358748_clear_bits(bridge, CONFCTL_REG, BIT(15));
+	tc358748_write(bridge, SYSCTL_REG, 0);
 
 	return tc358748_set_bits(bridge, CONFCTL_REG, PPEN); //Parallel Port Enable
-#endif
-}
-
-
-static int tc358748_status(struct tc358748_dev *bridge)
-{
-	struct device *dev = bridge->sd.dev;
-	unsigned	 wait;
-	u32 rxdata;
-
-	/* Default to 30ms */
-	wait = 100;
-	msleep(wait); /* In order to receive some packets */
-
-	dev_dbg(dev, "====================\n");
-	tc358748_read(bridge, PHYSTA_REG, &rxdata);
-	dev_dbg(dev, "PHYSTA=0x%X\n", rxdata);
-	tc358748_read(bridge, CSISTATUS_REG, &rxdata);
-	dev_dbg(dev, "CSISTATUS=0x%X\n", rxdata);
-	tc358748_read(bridge, CSIERREN_REG, &rxdata);
-	dev_dbg(dev, "CSIERREN=0x%X\n", rxdata);
-	tc358748_read(bridge, MDLSYNERR_REG, &rxdata);
-	dev_dbg(dev, "MDLSYNERR=0x%X\n", rxdata);
-	tc358748_read(bridge, CSIDID_REG, &rxdata);
-	dev_dbg(dev, "CSIDID=0x%X\n", rxdata);
-	tc358748_read(bridge, CSIDIDERR_REG, &rxdata);
-	dev_dbg(dev, "CSIDIDERR=0x%X\n", rxdata);
-	tc358748_read(bridge, CSIPKTLEN_REG, &rxdata);
-	dev_dbg(dev, "CSIPKTLEN=0x%X\n", rxdata);
-	tc358748_read(bridge, CSIRX_DPCTL_REG, &rxdata);
-	dev_dbg(dev, "CSIRX_DPCTL=0x%X\n", rxdata);
-
-	tc358748_read(bridge, FRMERRCNT_REG, &rxdata);
-	dev_dbg(dev, "FRMERRCNT=0x%X\n", rxdata);
-	tc358748_read(bridge, CRCERRCNT_REG, &rxdata);
-	dev_dbg(dev, "CRCERRCNT=0x%X\n", rxdata);
-	tc358748_read(bridge, CORERRCNT_REG, &rxdata);
-	dev_dbg(dev, "CORERRCNT=0x%X\n", rxdata);
-	tc358748_read(bridge, HDRERRCNT_REG, &rxdata);
-	dev_dbg(dev, "HDRERRCNT=0x%X\n", rxdata);
-	tc358748_read(bridge, EIDERRCNT_REG, &rxdata);
-	dev_dbg(dev, "EIDERRCNT=0x%X\n", rxdata);
-	tc358748_read(bridge, CTLERRCNT_REG, &rxdata);
-	dev_dbg(dev, "CTLERRCNT=0x%X\n", rxdata);
-	tc358748_read(bridge, SOTERRCNT_REG, &rxdata);
-	dev_dbg(dev, "SOTERRCNT=0x%X\n", rxdata);
-	tc358748_read(bridge, SYNERRCNT_REG, &rxdata);
-	dev_dbg(dev, "SYNERRCNT=0x%X\n", rxdata);
-	tc358748_read(bridge, MDLERRCNT_REG, &rxdata);
-	dev_dbg(dev, "MDLERRCNT=0x%X\n", rxdata);
-	tc358748_read(bridge, FIFOSTATUS_REG, &rxdata);
-	dev_dbg(dev, "FIFOSTATUS=0x%X\n", rxdata);
-	tc358748_read(bridge, PP_MISC_REG, &rxdata);
-	dev_dbg(dev, "PP_MISC_REG=0x%X\n", rxdata);
-
-	tc358748_read(bridge, 0x00E0, &rxdata);
-	dev_dbg(dev, "(DBG_LCNT=0x%X\n", rxdata);
-	tc358748_read(bridge, 0x00E2, &rxdata);
-	dev_dbg(dev, "DBG_Width=0x%X\n", rxdata);
-	tc358748_read(bridge, 0x00E4, &rxdata);
-	dev_dbg(dev, "DBG_VBlank=0x%X\n", rxdata);
-	tc358748_read(bridge, 0x00E8, &rxdata);
-	dev_dbg(dev, "DBG_Data=0x%X\n", rxdata);
-
-	tc358748_read(bridge, CLW_CNTRL_REG, &rxdata);
-	dev_dbg(dev, "CLW_CNTRL_REG=0x%X\n", rxdata);
-	tc358748_read(bridge, D0W_CNTRL_REG, &rxdata);
-	dev_dbg(dev, "D0W_CNTRL_REG=0x%X\n", rxdata);
-	tc358748_read(bridge, D1W_CNTRL_REG, &rxdata);
-	dev_dbg(dev, "D1W_CNTRL_REG=0x%X\n", rxdata);
-	tc358748_read(bridge, D2W_CNTRL_REG, &rxdata);
-	dev_dbg(dev, "D2W_CNTRL_REG=0x%X\n", rxdata);
-
-	tc358748_read(bridge, STARTCNTRL_REG, &rxdata);
-	dev_dbg(dev, "STARTCNTRL_REG=0x%X\n", rxdata);
-	tc358748_read(bridge, PPISTATUS_REG, &rxdata);
-	dev_dbg(dev, "PPISTATUS_REG=0x%X\n", rxdata);
-
-	tc358748_read(bridge, MCLKCTL_REG, &rxdata);
-	dev_dbg(dev, "MCLKCTL_REG=0x%X\n", rxdata);
-	tc358748_read(bridge, 0xE, &rxdata); // GPIOEn
-	dev_dbg(dev, "GPIOEn=0x%X\n", rxdata);
-	tc358748_read(bridge, 0x10, &rxdata); // GPIO Direction Register
-	dev_dbg(dev, "GPIODIR=0x%X\n", rxdata);
-	tc358748_read(bridge, 0x12, &rxdata); // GPIO Direction Register
-	dev_dbg(dev, "GPIO Pin Value=0x%X\n", rxdata);
-	tc358748_read(bridge, 0x14, &rxdata); // GPIO Direction Register
-	dev_dbg(dev, "GPIO Output Value=0x%X\n", rxdata);
-
-	dev_dbg(dev, "====================\n");
-
-	return 0;
 }
 
 /* Loop through all delay value in order to find the working window. And then
@@ -1326,6 +1088,7 @@ static int tc358748_calibrate(struct tc358748_dev *bridge)
 	unsigned	 dly;
 	u32 val, dsettle, csistatus, physta;
 
+	tc358748_write(bridge, CSIERREN_REG, 0xffff);
 	/* Default to 30ms */
 	error_wait = 30;
 
@@ -1404,9 +1167,7 @@ static int tc358748_s_stream(struct v4l2_subdev *sd, int enable)
 	if (ret)
 		goto out;
 
-	ret = tc358748_status(bridge);
-//	ret = tc358748_calibrate(bridge);
-
+	ret = tc358748_calibrate(bridge);
 out:
 	mutex_unlock(&bridge->lock);
 	return ret;
@@ -1422,7 +1183,6 @@ static int tc358748_init_cfg(struct v4l2_subdev *sd,
 
 	fmt = v4l2_subdev_get_try_format(sd, cfg, TC358748_SOURCE);
 	*fmt = tc358748_def_source_fmt;
-	fmt->code = tc358748_src_mbus_code(tc358748_def_source_fmt.code);
 
 	return 0;
 }
@@ -1450,30 +1210,35 @@ static int tc358748_get_fmt(struct v4l2_subdev *sd,
 	struct v4l2_mbus_framefmt *mbus_fmt = &format->format;
 	struct tc358748_dev *bridge = to_tc358748_dev(sd);
 	struct v4l2_mbus_framefmt *fmt;
-	struct v4l2_subdev	*remote = tc358748_get_remote_sd(sd);
-
-	//dev_dbg(dev, "%s probe %d", __func__, format->pad);
+	struct v4l2_subdev *remote = tc358748_get_remote_sd(sd);
 
 	if (format->pad >= TC358748_NR_PADS)
-		return -EINVAL;
-
-	if (format->pad == TC358748_SINK)
 		return -EINVAL;
 
 	if (!remote)
 		return -ENODEV;
 
 	if (format->which == V4L2_SUBDEV_FORMAT_TRY)
-		fmt = v4l2_subdev_get_try_format(remote, cfg, format->pad);
+		fmt = v4l2_subdev_get_try_format(remote, cfg, 0);
 	else
-		fmt = &bridge->source_fmt;
+		fmt = &bridge->sink_fmt; // mbus_csi_code
 
 	mutex_lock(&bridge->lock);
 
 	*mbus_fmt = *fmt;
-	/* code may need to be converted for source */
-	if (format->pad == TC358748_SOURCE)
-		mbus_fmt->code = serial_to_parallel_code(mbus_fmt->code);
+
+	if (format->pad == TC358748_SOURCE) {
+		mbus_fmt->code = tc358748_mbus_par_code(mbus_fmt->code);
+
+		if (mbus_fmt->code != fmt->code) {
+			const struct tc358748_format *sink_fmt, *source_fmt;
+
+			sink_fmt = tc358748_get_format_by_code(TC358748_SINK, fmt->code);
+			source_fmt = tc358748_get_format_by_code(TC358748_SOURCE, mbus_fmt->code);
+
+			mbus_fmt->width = (fmt->width*sink_fmt->bpp + source_fmt->bpp - 8)/source_fmt->bpp;
+		}
+	}
 
 	mutex_unlock(&bridge->lock);
 
@@ -1488,14 +1253,12 @@ static void tc358748_set_fmt_source(struct v4l2_subdev *sd,
 
 	/* source pad mirror active sink pad */
 	format->format = bridge->source_fmt;
-	/* but code may need to be converted */
-	format->format.code = serial_to_parallel_code(format->format.code);
 
 	/* only apply format for V4L2_SUBDEV_FORMAT_TRY case */
 	if (format->which != V4L2_SUBDEV_FORMAT_TRY)
 		return;
 
-	*v4l2_subdev_get_try_format(sd, cfg, format->pad) = format->format;
+	*v4l2_subdev_get_try_format(sd, cfg, TC358748_SOURCE) = format->format;
 }
 
 static void tc358748_set_fmt_sink(struct v4l2_subdev *sd,
@@ -1505,14 +1268,26 @@ static void tc358748_set_fmt_sink(struct v4l2_subdev *sd,
 	struct tc358748_dev *bridge = to_tc358748_dev(sd);
 	struct v4l2_mbus_framefmt *fmt;
 
-	format->format.code = get_fmt_code(format->format.code);
-
 	if (format->which == V4L2_SUBDEV_FORMAT_TRY)
-		fmt = v4l2_subdev_get_try_format(sd, cfg, format->pad);
+		fmt = v4l2_subdev_get_try_format(sd, cfg, TC358748_SINK);
 	else
 		fmt = &bridge->sink_fmt;
 
 	*fmt = format->format;
+
+	fmt = &bridge->source_fmt;
+	*fmt = format->format;
+
+	fmt->code = tc358748_mbus_par_code(fmt->code);
+
+	if (fmt->code != format->format.code) {
+		const struct tc358748_format *sink_fmt, *source_fmt;
+
+		sink_fmt = tc358748_get_format_by_code(TC358748_SINK, format->format.code);
+		source_fmt = tc358748_get_format_by_code(TC358748_SOURCE, fmt->code);
+
+		fmt->width = (format->format.width*sink_fmt->bpp + source_fmt->bpp - 8)/source_fmt->bpp;
+	}
 }
 
 static int tc358748_set_fmt(struct v4l2_subdev *sd,
@@ -1520,13 +1295,19 @@ static int tc358748_set_fmt(struct v4l2_subdev *sd,
 			   struct v4l2_subdev_format *format)
 {
 	struct tc358748_dev *bridge = to_tc358748_dev(sd);
-	struct device *dev = bridge->sd.dev;
+	struct v4l2_subdev *remote = tc358748_get_remote_sd(sd);
 	int ret = 0;
-
-	dev_dbg(dev, "%s for %d", __func__, format->pad);
 
 	if (format->pad >= TC358748_NR_PADS)
 		return -EINVAL;
+
+	if (!remote)
+		return -EINVAL;
+
+	format->format.code = tc358748_mbus_csi_code(format->format.code);
+
+	if ((format->pad == TC358748_SINK) && ((ret = v4l2_subdev_call(remote, pad, set_fmt, cfg, format)) != 0))
+		return ret;
 
 	mutex_lock(&bridge->lock);
 
@@ -1544,8 +1325,7 @@ static int __maybe_unused
 tc358748_g_register(struct v4l2_subdev *sd, struct v4l2_dbg_register *reg)
 {
 	struct tc358748_dev *bridge = to_tc358748_dev(sd);
-	/* 32-bit registers starting from CLW_DPHYCONTTX */
-	reg->size = reg->reg < CLW_DPHYCONTTX_REG ? 2 : 4;
+	reg->size = 2;
 	tc358748_read(bridge, reg->reg, (u32 *)&reg->val);
 	return 0;
 }
@@ -1614,24 +1394,24 @@ static const struct media_entity_operations tc358748_subdev_entity_ops = {
 
 static int tc358748_init_controls(struct tc358748_dev *bridge)
 {
-//	u64 *link_frequencies = bridge->tx.link_frequencies;
-//	struct v4l2_ctrl *ctrl;
+	u64 *link_frequencies = bridge->rx.link_frequencies;
+	struct v4l2_ctrl *ctrl;
 	int err;
 
 	err = v4l2_ctrl_handler_init(&bridge->ctrl_hdl, 0);
 	if (err)
 		return err;
 
-//	ctrl = v4l2_ctrl_new_int_menu(ctrl_hdl, &tc358748_ctrl_ops, V4L2_CID_LINK_FREQ,
-//			       0, 0, link_frequencies);
-//	if (ctrl)
-//		ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+	ctrl = v4l2_ctrl_new_int_menu(&bridge->ctrl_hdl, NULL /*&tc358748_ctrl_ops*/, V4L2_CID_LINK_FREQ,
+			       0, 0, link_frequencies);
+	if (ctrl)
+		ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 
-//	err = bridge->ctrl_hdl.error;
-//	if (err) {
-//		v4l2_ctrl_handler_free(&bridge->ctrl_hdl);
-//		return err;
-//	}
+	err = bridge->ctrl_hdl.error;
+	if (err) {
+		v4l2_ctrl_handler_free(&bridge->ctrl_hdl);
+		return err;
+	}
 
 	bridge->sd.ctrl_handler = &bridge->ctrl_hdl;
 
@@ -1642,7 +1422,7 @@ static int tc358748_async_bound(struct v4l2_async_notifier *notifier,
 			       struct v4l2_subdev *sd,
 			       struct v4l2_async_subdev *asd)
 {
-	struct tc358748_dev *bridge = to_tc358748_dev(notifier->sd);
+	struct tc358748_dev *bridge = to_tc358748_dev(notifier->sd); // container_of(notifier, struct tc358748_dev,notifier)
 	struct device *dev = bridge->sd.dev;
 	int ret;
 	struct v4l2_subdev *src_subdev;
@@ -1678,13 +1458,11 @@ static const struct v4l2_async_notifier_operations tc358748_notifier_ops = {
 	.bound		= tc358748_async_bound,
 };
 
-static int tc358748_parse_tx_ep(struct tc358748_dev *bridge)
+static int tc358748_parse_rx_ep(struct tc358748_dev *bridge)
 {
 	struct v4l2_fwnode_endpoint *vep;
 	struct i2c_client *client = bridge->i2c_client;
 	struct device_node *ep_node;
-	unsigned long refclk;
-	unsigned long csi_link_rate;
 	unsigned char csi_lanes;
 	int ret;
 
@@ -1696,8 +1474,7 @@ static int tc358748_parse_tx_ep(struct tc358748_dev *bridge)
 		goto error;
 	}
 
-	/* Currently we only support 'parallel in' -> 'csi out' */
-	vep = &bridge->tx;
+	vep = &bridge->rx;
 	vep->bus_type = V4L2_MBUS_CSI2_DPHY;
 	ret = v4l2_fwnode_endpoint_alloc_parse(of_fwnode_handle(ep_node), vep);
 	if (ret) {
@@ -1716,16 +1493,6 @@ static int tc358748_parse_tx_ep(struct tc358748_dev *bridge)
 
 	if ( vep->nr_of_link_frequencies == 0) {
 		dev_err(&client->dev, "error: Invalid CSI-2 settings\n");
-		ret = -EINVAL;
-		goto error_fwnode;
-	}
-
-	refclk = bridge->refclk_freq;
-	csi_link_rate = (unsigned long)vep->link_frequencies[0];
-
-	bridge->pll_rate = tc358748_find_pll_settings(bridge, refclk, csi_link_rate * 2);
-	if (!bridge->pll_rate) {
-		dev_err(&client->dev, "unable to find pll settings. csi_link_rate is %lu\n", csi_link_rate);
 		ret = -EINVAL;
 		goto error_fwnode;
 	}
@@ -1762,7 +1529,7 @@ error:
 	return ret;
 }
 
-static int tc358748_parse_rx_ep(struct tc358748_dev *bridge)
+static int tc358748_parse_tx_ep(struct tc358748_dev *bridge)
 {
 	struct v4l2_fwnode_endpoint ep = { .bus_type = V4L2_MBUS_PARALLEL };
 	struct i2c_client *client = bridge->i2c_client;
@@ -1785,7 +1552,7 @@ static int tc358748_parse_rx_ep(struct tc358748_dev *bridge)
 	}
 
 	of_node_put(ep_node);
-	bridge->rx = ep;
+	bridge->tx = ep;
 
 	return 0;
 
@@ -1879,15 +1646,15 @@ static int tc358748_probe(struct i2c_client *client)
 		goto power_off;
 	}
 
-	ret = tc358748_parse_tx_ep(bridge);
-	if (ret) {
-		dev_err(dev, "failed to parse tx %d\n", ret);
-		goto power_off;
-	}
-
 	ret = tc358748_parse_rx_ep(bridge);
 	if (ret) {
 		dev_err(dev, "failed to parse rx %d\n", ret);
+		goto power_off;
+	}
+
+	ret = tc358748_parse_tx_ep(bridge);
+	if (ret) {
+		dev_err(dev, "failed to parse tx %d\n", ret);
 		goto err_fwnode;
 	}
 
@@ -1900,7 +1667,7 @@ static int tc358748_probe(struct i2c_client *client)
 		dev_err(&client->dev, "Not found mclk-rate property in device-tree\n");
 		return -EINVAL;
 	}
-	tc358748_find_mclk_settings(bridge, mclk_freq);
+	bridge->mclk_rate = mclk_freq;
 #endif // MCLK_ENABLE
 
 	if (of_property_read_u8(client->dev.of_node, "hsync-active", &bridge->hsync_active)) {
@@ -1919,22 +1686,15 @@ static int tc358748_probe(struct i2c_client *client)
 		dev_info(dev, "register sub-device '%s'\n", bridge->sd.name);
 
 	dev_info(dev, "%s found @ 0x%x (%s)\n", client->name,
-						client->addr, client->adapter->name);
+		client->addr, client->adapter->name);
 
-	{
-		u32 rxdata;
-		tc358748_read(bridge, THS_HEADERCNT_REG, &rxdata); // THS_ZEROCNT[6:0]: THS_PREPARECNT[6:0]
-		dev_dbg(dev, "THS_HEADERCNT_REG(%X)=0x%X\n", THS_HEADERCNT_REG, rxdata);
-		tc358748_read(bridge, TCLK_TRAILCNT_REG, &rxdata); // TCLKTRAILCNT[7:0]
-		dev_dbg(dev, "TCLK_TRAILCNT_REG(%X)=0x%X\n", TCLK_TRAILCNT_REG, rxdata);
-	}
 	return 0;
 
 unregister_notifier:
 	v4l2_async_notifier_unregister(&bridge->notifier);
 	v4l2_async_notifier_cleanup(&bridge->notifier);
 err_fwnode:
-	v4l2_fwnode_endpoint_free(&bridge->tx);
+	v4l2_fwnode_endpoint_free(&bridge->rx);
 power_off:
 	tc358748_set_power_off(bridge);
 entity_cleanup:
@@ -1953,7 +1713,7 @@ static int tc358748_remove(struct i2c_client *client)
 	v4l2_async_notifier_unregister(&bridge->notifier);
 	v4l2_async_notifier_cleanup(&bridge->notifier);
 	v4l2_async_unregister_subdev(&bridge->sd);
-	v4l2_fwnode_endpoint_free(&bridge->tx);
+	v4l2_fwnode_endpoint_free(&bridge->rx);
 
 	tc358748_set_power_off(bridge);
 	media_entity_cleanup(&bridge->sd.entity);
