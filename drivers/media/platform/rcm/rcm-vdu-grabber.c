@@ -92,6 +92,11 @@ static const struct grb_pix_map grb_pix_map_list[] = {
 		.pixelformat = V4L2_PIX_FMT_NV16,
 		.bpp = 2,
 	},
+	{
+		.code = MEDIA_BUS_FMT_UYVY8_2X8,
+		.pixelformat = V4L2_PIX_FMT_NV12,
+		.bpp = 2,
+	},
 	/* Bayer formats */
 	{ // 4
 		.code = MEDIA_BUS_FMT_SBGGR8_1X8,
@@ -308,7 +313,7 @@ static int set_input_format( struct grb_info *grb ) {
 		grb->in_f.color = YCBCR;
 		GRB_DBG_PRINT( "input format is YCBCR 4:4:4\n" );
 	} 
-	else if( param->d_format == D_FMT_RGB888 ) {		// 1
+	else if( param->d_format == D_FMT_RGB888 ) {		// 2
 		format_data = 0x1 ;								// RGB
 		GRB_DBG_PRINT( "input format data is RGB\n" );
 		active_bus  = 0x3 ;								// d0,d1,d2
@@ -327,8 +332,8 @@ static int set_input_format( struct grb_info *grb ) {
 	grb->in_f.format_din = format_data;			// 1–RGB,0-YCbCr
 	grb->in_f.format_din |= (active_bus << 1) ;	// 1–dv0;2–dv0,dv1;3–dv0,dv1,dv2
 							//
-	if ( active_bus != 1 )
-		grb->in_f.format_din |= (param->std_in << 3) ;	// 0-not duplication,1–duplication (SDTV)
+	//if ( active_bus != 1 )
+	grb->in_f.format_din |= (param->std_in << 3) ;	// 0-not duplication,1–duplication (SDTV)
 
 	grb->in_f.format_din |= (param->sync << 4) ;	// synchronization: 0–external(hsync,vsync,field,data_enable); 1–internal(EAV,SAV)
 
@@ -385,6 +390,15 @@ static int set_output_format( struct grb_info *grb ) {
 		grb->out_f.c_full_size = pix_fmt->bytesperline;
 		GRB_DBG_PRINT( "output pixelformat: YCBCR422 two planes\n" );
 		break;
+    case V4L2_PIX_FMT_NV12:                                     // 'NV12'
+        grb->out_f.format_dout = 0x04;
+        grb->out_f.color = YCBCR;
+        grb->out_f.y_full_size = pix_fmt->bytesperline * 2;
+        grb->out_f.c_hor_size = pix_fmt->width;
+        grb->out_f.c_ver_size = pix_fmt->height;
+        grb->out_f.c_full_size = pix_fmt->bytesperline;
+        GRB_DBG_PRINT( "output pixelformat: YCBCR420 two planes\n" );
+        break;
 	case V4L2_PIX_FMT_YUV422P:									// '422P'='Y42B'
 		grb->out_f.format_dout = 0x06;
 		grb->out_f.color = YCBCR;
@@ -965,10 +979,21 @@ static void buffer_finish(struct vb2_buffer *vb)
 	unsigned long y_ver_size, origin_size;
 	unsigned long i, j, k;
 
+
+#if 0
+	if (pix_fmt->pixelformat == V4L2_PIX_FMT_NV12)
+	{
+		printk("FixBufSize\n");
+		frame_full_size = vb2_get_plane_payload(vb, 0);
+		vb2_set_plane_payload(vb, 0, 12 * frame_full_size / 16 );
+		return;
+	}
+#endif
+
 	if ((pix_fmt->pixelformat != V4L2_PIX_FMT_SBGGR8) && (pix_fmt->pixelformat != V4L2_PIX_FMT_SGBRG8) &&
 	    (pix_fmt->pixelformat != V4L2_PIX_FMT_SGRBG8) && (pix_fmt->pixelformat != V4L2_PIX_FMT_SRGGB8))
 		return;
-	
+
 	frame_full_size = vb2_get_plane_payload(vb, 0);
 	y_hor_size = grb->out_f.y_hor_size *4;
 	y_full_size = grb->out_f.y_full_size*4;
@@ -1225,6 +1250,7 @@ static int vidioc_fmt( struct grb_info *grb, struct v4l2_format *f ) {
 			f->fmt.pix.bytesperline = f->fmt.pix.width;
 			f->fmt.pix.sizeimage    = f->fmt.pix.bytesperline*f->fmt.pix.height*3;
 			break;
+		case V4L2_PIX_FMT_NV12:
 		case V4L2_PIX_FMT_NV16:
 		case V4L2_PIX_FMT_YUV422P:
 			f->fmt.pix.bytesperline = f->fmt.pix.width;
@@ -1295,6 +1321,11 @@ static int vidioc_enum_fmt_vid_cap_grb( struct file *file, void *fh, struct v4l2
 		strlcpy( fmt->description, "YUV 4:4:4", sizeof(fmt->description) );
 		fmt->pixelformat = v4l2_fourcc( 'Y','M','2', '4' );
 		break;
+    case 9: // V4L2_PIX_FMT_NV12
+            fmt->flags = 0;
+            strlcpy( fmt->description, "YUV 4:2:0", sizeof(fmt->description) );
+            fmt->pixelformat = v4l2_fourcc( 'N','V','1', '2' );
+            break;
 	default:
 		return -EINVAL;
 	}
@@ -1383,6 +1414,7 @@ static int grb_try_fmt(struct grb_info *grb, struct v4l2_format *f, u32 *code)
 		pixfmt->bytesperline = pixfmt->width;
 		pixfmt->sizeimage    = pixfmt->bytesperline*pixfmt->height*3;
 		break;
+	case V4L2_PIX_FMT_NV12:		
 	case V4L2_PIX_FMT_NV16:
 	case V4L2_PIX_FMT_YUV422P:
 		pixfmt->bytesperline = pixfmt->width;
