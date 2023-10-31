@@ -42,52 +42,42 @@
 /* External clock frequency is 24.0M */
 #define IMX219_XCLK_FREQ		24000000
 
-/* Pixel rate is fixed at 182.4M for all the modes */
-#define IMX219_PIXEL_RATE		182400000
+/* Pixel rate is fixed at 216M for all the modes */
+#define IMX219_PIXEL_RATE		216000000
 
-#define IMX219_DEFAULT_LINK_FREQ	456000000
+#define IMX219_DEFAULT_LINK_FREQ	432000000
 
 /* V_TIMING internal */
 #define IMX219_REG_VTS			0x0160
-#define IMX219_VTS_15FPS		0x0dc6
-#define IMX219_VTS_30FPS_1080P		0x06e3
-#define IMX219_VTS_30FPS_BINNED		0x06e3
-#define IMX219_VTS_30FPS_640x480	0x06e3
-#define IMX219_VTS_MAX			0xffff
+#define IMX219_VTS_15FPS		0x1050 //  4176
+#define IMX219_VTS_30FPS_1080P		0x0828 //  2088
+#define IMX219_VTS_30FPS_BINNED		0x0828 //  2088
+#define IMX219_VTS_30FPS_640x480	0x0828 //  2088
+#define IMX219_VTS_MAX			0xf4b0 // 62640
 
-#define IMX219_VBLANK_MIN		32
-
-/*Frame Length Line*/
-#define IMX219_FLL_MIN			0x08a6
-#define IMX219_FLL_MAX			0xffff
-#define IMX219_FLL_STEP			1
-#define IMX219_FLL_DEFAULT		0x0c98
-
-/* HBLANK control range */
-#define IMX219_PPL_MIN			3448
-#define IMX219_PPL_MAX			0x7ff0
-#define IMX219_REG_HTS			0x0162
+#define IMX219_VBLANK_MIN		0x0038 //   56 (vtotal -     2520, vactive max - 2464)
+#define IMX219_HTOTAL_CON		0x0d78 // 3448 (hblank min -  168, hactive max - 3280)
 
 /* Exposure control */
 #define IMX219_REG_EXPOSURE		0x015a
-#define IMX219_EXPOSURE_MIN		4
-#define IMX219_EXPOSURE_STEP		1
-#define IMX219_EXPOSURE_DEFAULT		0x640
-#define IMX219_EXPOSURE_MAX		65535
+#define IMX219_EXPOSURE_MIN		0x4
+#define IMX219_EXPOSURE_STEP		0x1
+#define IMX219_EXPOSURE_DEFAULT		0x800
+#define IMX219_EXPOSURE_MAX		0xffff //65535
 
 /* Analog gain control */
 #define IMX219_REG_ANALOG_GAIN		0x0157
-#define IMX219_ANA_GAIN_MIN		0
-#define IMX219_ANA_GAIN_MAX		232
-#define IMX219_ANA_GAIN_STEP		1
-#define IMX219_ANA_GAIN_DEFAULT		0x0
+#define IMX219_ANA_GAIN_MIN		0x0
+#define IMX219_ANA_GAIN_MAX		0xe8 // 232
+#define IMX219_ANA_GAIN_STEP		0x1
+#define IMX219_ANA_GAIN_DEFAULT		0x80
 
 /* Digital gain control */
 #define IMX219_REG_DIGITAL_GAIN		0x0158
 #define IMX219_DGTL_GAIN_MIN		0x0100
 #define IMX219_DGTL_GAIN_MAX		0x0fff
 #define IMX219_DGTL_GAIN_DEFAULT	0x0100
-#define IMX219_DGTL_GAIN_STEP		1
+#define IMX219_DGTL_GAIN_STEP		0x1
 
 #define IMX219_REG_ORIENTATION		0x0172
 
@@ -158,98 +148,34 @@ struct imx219_mode {
 
 /* Link frequency setup */
 enum {
-	IMX219_LINK_FREQ_456MHZ,
-	IMX219_LINK_FREQ_228MHZ,
-	IMX219_LINK_FREQ_114MHZ,
-	IMX219_LINK_FREQ_016MHZ,
+	IMX219_LINK_FREQ_432MHZ,
 };
 
 static const s64 link_freqs[] = {
-	[IMX219_LINK_FREQ_456MHZ] = IMX219_DEFAULT_LINK_FREQ,
-	[IMX219_LINK_FREQ_228MHZ] = 228000000,
-	[IMX219_LINK_FREQ_114MHZ] = 114000000,
-	[IMX219_LINK_FREQ_016MHZ] = 16000000,
+	[IMX219_LINK_FREQ_432MHZ] = IMX219_DEFAULT_LINK_FREQ,
 };
 
-/* 456MHz is the nominal "default" link frequency */
-static const struct imx219_reg link_456Mhz_regs[] = {
+/* 432MHz is the nominal "default" link frequency */
+static const struct imx219_reg link_432Mhz_regs[] = {
 	/* PLL Clock Table */
 	// PIXEL CLOCK USED TO DRIVE SENSOR)
-	{0x0301, 0x05},	/* VTPXCK_DIV: 4: 1/4, 5: 1/5, 8: 1/8, 10: 1/10 */
+	{0x0301, 0x04},	/* VTPXCK_DIV: 4: 1/4, 5: 1/5, 8: 1/8, 10: 1/10 */
 	{0x0303, 0x01},	/* VTSYSCK_DIV = 1: Divide by 1 */
 	{0x0304, 0x03},	/* PREPLLCK_VT_DIV: 1: 1/1, 2: 1/2, 3: 1/3; 0x03 = AUTO set (MUST BE 3 FOR 24MHz)*/
 	{0x0305, 0x03}, /* PREPLLCK_OP_DIV: 1: 1/1, 2: 1/2, 3: 1/3; 0x03 = AUTO set (MUST BE 3 FOR 24MHz)*/
-	{0x0306, 0x00},	/* PLL_VT_MPY = 57 (Multiplier) */
-	{0x0307, 0x39},
+	{0x0306, 0x00},	/* PLL_VT_MPY = 54 (Multiplier) */
+	{0x0307, 0x36},
+	{0x0309, 0x08}, /* OPPXCK_DIV: 8 -> 1/8;*/
 	{0x030b, 0x01},	/* OP_SYS_CLK_DIV (divide by two for double data rate): 1:1/2 */
-	{0x030c, 0x00},	/* PLL_OP_MPY = 114 (Multiplier */
-	{0x030d, 0x72},
-	//Sensor Pixel Clock: EXCLK_FREQ / PREPLLLCK_VT_DIV * PLL_VT_MPY / VTPXCK_DIV: 24MHz / 3 * 57 / 5 = 91.2 MHz
-};
-
-/* 228MHz link frequency */
-static const struct imx219_reg link_228Mhz_regs[] = {
-	/* PLL Clock Table */
-	// PIXEL CLOCK USED TO DRIVE SENSOR)
-	{0x0301, 0x05},	/* VTPXCK_DIV: 4: 1/4, 5: 1/5, 8: 1/8, 10: 1/10 */
-	{0x0303, 0x01},	/* VTSYSCK_DIV = 1: Divide by 1 */
-	{0x0304, 0x03},	/* PREPLLCK_VT_DIV: 1: 1/1, 2: 1/2, 3: 1/3; 0x03 = AUTO set (MUST BE 3 FOR 24MHz)*/
-	{0x0305, 0x03}, /* PREPLLCK_OP_DIV: 1: 1/1, 2: 1/2, 3: 1/3; 0x03 = AUTO set (MUST BE 3 FOR 24MHz)*/
-	{0x0306, 0x00},	/* PLL_VT_MPY = 28 (Multiplier) */
-	{0x0307, 0x1C},
-	{0x030b, 0x01},	/* OP_SYS_CLK_DIV (divide by two for double data rate): 1:1/2 */
-	{0x030c, 0x00},	/* PLL_OP_MPY = 56 (Multiplier */
-	{0x030d, 0x38},
-	//Sensor Pixel Clock: EXCLK_FREQ / PREPLLLCK_VT_DIV * PLL_VT_MPY / VTPXCK_DIV: 24MHz / 3 * 28 / 5 = 44.8 MHz
-};
-
-/* 114MHz link frequency */
-static const struct imx219_reg link_114Mhz_regs[] = {
-	/* PLL Clock Table */
-	// PIXEL CLOCK USED TO DRIVE SENSOR)
-	{0x0301, 0x05},	/* VTPXCK_DIV: 4: 1/4, 5: 1/5, 8: 1/8, 10: 1/10 */
-	{0x0303, 0x01},	/* VTSYSCK_DIV = 1: Divide by 1 */
-	{0x0304, 0x03},	/* PREPLLCK_VT_DIV: 1: 1/1, 2: 1/2, 3: 1/3; 0x03 = AUTO set (MUST BE 3 FOR 24MHz)*/
-	{0x0305, 0x03}, /* PREPLLCK_OP_DIV: 1: 1/1, 2: 1/2, 3: 1/3; 0x03 = AUTO set (MUST BE 3 FOR 24MHz)*/
-	{0x0306, 0x00},	/* PLL_VT_MPY = 14 (Multiplier) */
-	{0x0307, 0x0E},
-	{0x030b, 0x01},	/* OP_SYS_CLK_DIV (divide by two for double data rate): 1:1/2 */
-	{0x030c, 0x00},	/* PLL_OP_MPY = 28 (Multiplier */
-	{0x030d, 0x1C},
-	//Sensor Pixel Clock: EXCLK_FREQ / PREPLLLCK_VT_DIV * PLL_VT_MPY / VTPXCK_DIV: 24MHz / 3 * 14 / 5 = 22.4 MHz
-};
-
-static const struct imx219_reg link_016Mhz_regs[] = {
-	/* PLL Clock Table */
-	// PIXEL CLOCK USED TO DRIVE SENSOR)
-	{0x0301, 0x05},	/* VTPXCK_DIV: 4: 1/4, 5: 1/5, 8: 1/8, 10: 1/10 */
-	{0x0303, 0x01},	/* VTSYSCK_DIV = 1: Divide by 1 */
-	{0x0304, 0x03},	/* PREPLLCK_VT_DIV: 1: 1/1, 2: 1/2, 3: 1/3; 0x03 = AUTO set (MUST BE 3 FOR 24MHz)*/
-	{0x0305, 0x03}, /* PREPLLCK_OP_DIV: 1: 1/1, 2: 1/2, 3: 1/3; 0x03 = AUTO set (MUST BE 3 FOR 24MHz)*/
-	{0x0306, 0x00},	/* PLL_VT_MPY = 2 (Multiplier) */
-	{0x0307, 0x02},
-	{0x030b, 0x01},	/* OP_SYS_CLK_DIV (divide by two for double data rate): 1:1/2 */
-	{0x030c, 0x00},	/* PLL_OP_MPY = 4 (Multiplier */
-	{0x030d, 0x04},
-	//Sensor Pixel Clock: EXCLK_FREQ / PREPLLLCK_VT_DIV * PLL_VT_MPY / VTPXCK_DIV: 24MHz / 3 * 2 / 5 = 3.2 MHz
+	{0x030c, 0x00},	/* PLL_OP_MPY = 108 (Multiplier) */
+	{0x030d, 0x6c},
+	//Sensor Pixel Clock: EXCLK_FREQ / PREPLLLCK_VT_DIV * PLL_VT_MPY / VTPXCK_DIV: 24MHz / 3 * 54 / 4 = 108 MHz
 };
 
 static const struct imx219_reg_list link_freq_regs[] = {
-	[IMX219_LINK_FREQ_456MHZ] = {
-		.regs = link_456Mhz_regs,
-		.num_of_regs = ARRAY_SIZE(link_456Mhz_regs)
-	},
-	[IMX219_LINK_FREQ_228MHZ] = {
-		.regs = link_228Mhz_regs,
-		.num_of_regs = ARRAY_SIZE(link_228Mhz_regs)
-	},
-	[IMX219_LINK_FREQ_114MHZ] = {
-		.regs = link_114Mhz_regs,
-		.num_of_regs = ARRAY_SIZE(link_114Mhz_regs)
-	},
-	[IMX219_LINK_FREQ_016MHZ] = {
-		.regs = link_016Mhz_regs,
-		.num_of_regs = ARRAY_SIZE(link_016Mhz_regs)
+	[IMX219_LINK_FREQ_432MHZ] = {
+		.regs = link_432Mhz_regs,
+		.num_of_regs = ARRAY_SIZE(link_432Mhz_regs)
 	},
 };
 
@@ -280,8 +206,12 @@ static const struct imx219_reg imx219_common_regs[] = {
 	{0x479b, 0x0e},
 
 	/* Frame Bank Register Group "A" */
+	{0x0162, 0x0d}, /* Line_Length_A == const 3448 */
+	{0x0163, 0x78},
 	{0x0170, 0x01}, /* X_ODD_INC_A */
 	{0x0171, 0x01}, /* Y_ODD_INC_A */
+	{0x018c, 0x08}, /* Raw8 */
+	{0x018d, 0x08}, /* Raw8 */
 
 	/* Output setup registers */
 	{0x0114, 0x01},	/* CSI 2-Lane Mode */
@@ -298,9 +228,9 @@ static const struct imx219_reg imx219_common_regs[] = {
 static const struct imx219_reg mode_3280x2464_regs[] = {
 
 	{0x011A, 0x00}, // THS_PREPARE[8]
-	{0x011B, 0x2F}, // THS_PREPARE[7:0]
+	{0x011B, 0x32}, // THS_PREPARE[7:0]
 	{0x011C, 0x00}, // THS_ZERO_MIN[8]
-	{0x011D, 0x70}, // THS_ZERO_MIN[7:0]
+	{0x011D, 0x64}, // THS_ZERO_MIN[7:0]
 
 	{0x0164, 0x00},
 	{0x0165, 0x00},
@@ -323,9 +253,9 @@ static const struct imx219_reg mode_3280x2464_regs[] = {
 static const struct imx219_reg mode_1920_1080_regs[] = {
 
 	{0x011A, 0x00}, // THS_PREPARE[8]
-	{0x011B, 0x2F}, // THS_PREPARE[7:0]
+	{0x011B, 0x32}, // THS_PREPARE[7:0]
 	{0x011C, 0x00}, // THS_ZERO_MIN[8]
-	{0x011D, 0x70}, // THS_ZERO_MIN[7:0]
+	{0x011D, 0x64}, // THS_ZERO_MIN[7:0]
 
 	{0x0164, 0x02},
 	{0x0165, 0xa8},
@@ -348,9 +278,9 @@ static const struct imx219_reg mode_1920_1080_regs[] = {
 static const struct imx219_reg mode_1640_1232_regs[] = {
 
 	{0x011A, 0x00}, // THS_PREPARE[8]
-	{0x011B, 0x2F}, // THS_PREPARE[7:0]
+	{0x011B, 0x32}, // THS_PREPARE[7:0]
 	{0x011C, 0x00}, // THS_ZERO_MIN[8]
-	{0x011D, 0x70}, // THS_ZERO_MIN[7:0]
+	{0x011D, 0x64}, // THS_ZERO_MIN[7:0]
 
 	{0x0164, 0x00},
 	{0x0165, 0x00},
@@ -373,58 +303,30 @@ static const struct imx219_reg mode_1640_1232_regs[] = {
 static const struct imx219_reg mode_640_480_regs[] = {
 
 	{0x011A, 0x00}, // THS_PREPARE[8]
-	{0x011B, 0x2F}, // THS_PREPARE[7:0]
+	{0x011B, 0x32}, // THS_PREPARE[7:0]
 	{0x011C, 0x00}, // THS_ZERO_MIN[8]
-	{0x011D, 0x70}, // THS_ZERO_MIN[7:0]
+	{0x011D, 0x64}, // THS_ZERO_MIN[7:0]
 
-
-	// Frame Length: 569
-	{0x0160, 0x01}, {0x0161, 0x89},
-	// Line Length: 3559
-	{0x0162, 0x0D}, {0x0163, 0xE8},
-
-	// Window Width: 2279 - 1000 = 1280 - 1
-
-	// crop_rect.left: 1000
-	{0x0164, 0x03}, {0x0165, 0xe8},
-	// crop_rect.width: 2279
-	{0x0166, 0x08},	{0x0167, 0xe7},
-
-	// Window Height: 1711 - 752 = 960 - 1 (2 X 480)
-
-	// crop_rect.top: 752
-	{0x0168, 0x02}, {0x0169, 0xf0},
-	// crop_rect.height: 1711
-	{0x016a, 0x06}, {0x016b, 0xaf},
-
-	// image width = 640
-	{0x016c, 0x02},	{0x016d, 0x80},
-	// image height = 480
-	{0x016e, 0x01},	{0x016f, 0xe0},
-
+	{0x0164, 0x03},
+	{0x0165, 0xe8},
+	{0x0166, 0x08},
+	{0x0167, 0xe7},
+	{0x0168, 0x02},
+	{0x0169, 0xf0},
+	{0x016a, 0x06},
+	{0x016b, 0xaf},
+	{0x016c, 0x02},
+	{0x016d, 0x80},
+	{0x016e, 0x01},
+	{0x016f, 0xe0},
 	{0x0624, 0x06},
 	{0x0625, 0x68},
 	{0x0626, 0x04},
 	{0x0627, 0xd0},
 };
 
-static const struct imx219_reg raw8_framefmt_regs[] = {
-	{0x018c, 0x08},
-	{0x018d, 0x08},
-	{0x0309, 0x08},
-};
-
-static const struct imx219_reg raw10_framefmt_regs[] = {
-	{0x018c, 0x0a},
-	{0x018d, 0x0a},
-	{0x0309, 0x0a},
-};
-
 static const s64 imx219_link_freq_menu[] = {
 	IMX219_DEFAULT_LINK_FREQ,
-	228000000,
-	114000000,
-	16000000,
 };
 
 static const char * const imx219_test_pattern_menu[] = {
@@ -463,11 +365,6 @@ static const char * const imx219_supply_name[] = {
  * - h&v flips
  */
 static const u32 codes[] = {
-	MEDIA_BUS_FMT_SRGGB10_1X10,
-	MEDIA_BUS_FMT_SGRBG10_1X10,
-	MEDIA_BUS_FMT_SGBRG10_1X10,
-	MEDIA_BUS_FMT_SBGGR10_1X10,
-
 	MEDIA_BUS_FMT_SRGGB8_1X8,
 	MEDIA_BUS_FMT_SGRBG8_1X8,
 	MEDIA_BUS_FMT_SGBRG8_1X8,
@@ -501,7 +398,6 @@ static const u32 codes[] = {
 #define IMX219_XCLR_MIN_DELAY_US	6200
 #define IMX219_XCLR_DELAY_RANGE_US	1000
 
-//#define IMX219_DEFAULT_FORMAT_INDX  0
 #define IMX219_DEFAULT_FORMAT_INDX  3
 
 /* Mode configs */
@@ -648,12 +544,15 @@ static int imx219_read_reg(struct imx219 *imx219, u16 reg, u32 len, u32 *val)
 
 	*val = get_unaligned_be32(data_buf);
 
+printk("IMX219 R: addr(0x%x), reg%d (0x%x), val%d (0x%x).\n", client->addr, ARRAY_SIZE(addr_buf), reg, len, *val);
+
 	return 0;
 }
 
 /* Write registers up to 2 at a time */
 static int imx219_write_reg(struct imx219 *imx219, u16 reg, u32 len, u32 val)
 {
+
 	struct i2c_client *client = v4l2_get_subdevdata(&imx219->sd);
 	u8 buf[6];
 
@@ -664,6 +563,8 @@ static int imx219_write_reg(struct imx219 *imx219, u16 reg, u32 len, u32 val)
 	put_unaligned_be32(val << (8 * (4 - len)), buf + 2);
 	if (i2c_master_send(client, buf, len + 2) != len + 2)
 		return -EIO;
+
+printk("IMX219 W: addr(0x%x), reg%d (0x%x), val%d (0x%x).\n", client->addr, 2, reg, len, val);
 
 	return 0;
 }
@@ -810,11 +711,6 @@ static int imx219_set_ctrl(struct v4l2_ctrl *ctrl)
 		ret = imx219_write_reg(imx219, IMX219_REG_VTS,
 				       IMX219_REG_VALUE_16BIT,
 				       imx219->mode->height + ctrl->val);
-		break;
-	case V4L2_CID_HBLANK:
-		ret = imx219_write_reg(imx219, IMX219_REG_HTS,
-				       IMX219_REG_VALUE_16BIT,
-				       imx219->mode->width + ctrl->val);
 		break;
 	case V4L2_CID_TEST_PATTERN_RED:
 		ret = imx219_write_reg(imx219, IMX219_REG_TESTP_RED,
@@ -974,8 +870,6 @@ static int imx219_set_pad_format(struct v4l2_subdev *sd,
 		*framefmt = fmt->format;
 	} else if (imx219->mode != mode ||
 		   imx219->fmt.code != fmt->format.code) {
-		u32 prev_hts = imx219->mode->width + imx219->hblank->val;
-
 		imx219->fmt = fmt->format;
 		imx219->mode = mode;
 		/* Update limits and set FPS to default */
@@ -992,20 +886,11 @@ static int imx219_set_pad_format(struct v4l2_subdev *sd,
 					 imx219->exposure->minimum,
 					 exposure_max, imx219->exposure->step,
 					 exposure_def);
-		/*
-		 * Retain PPL setting from previous mode so that the
-		 * line time does not change on a mode change.
-		 * Limits have to be recomputed as the controls define
-		 * the blanking only, so PPL values need to have the
-		 * mode width subtracted.
-		 */
-		hblank = prev_hts - mode->width;
-		__v4l2_ctrl_modify_range(imx219->hblank,
-						 IMX219_PPL_MIN - mode->width,
-						 IMX219_PPL_MAX - mode->width,
-						 1,
-						 IMX219_PPL_MIN - mode->width);
-		__v4l2_ctrl_s_ctrl(imx219->hblank, hblank);
+
+		hblank = IMX219_HTOTAL_CON - mode->width;
+		__v4l2_ctrl_modify_range(imx219->hblank, hblank, hblank, 1,
+						 hblank);
+		//__v4l2_ctrl_s_ctrl(imx219->hblank, hblank);
 	}
 
 	mutex_unlock(&imx219->mutex);
@@ -1020,15 +905,7 @@ static int imx219_set_framefmt(struct imx219 *imx219)
 	case MEDIA_BUS_FMT_SGRBG8_1X8:
 	case MEDIA_BUS_FMT_SGBRG8_1X8:
 	case MEDIA_BUS_FMT_SBGGR8_1X8:
-		return imx219_write_regs(imx219, raw8_framefmt_regs,
-					ARRAY_SIZE(raw8_framefmt_regs));
-
-	case MEDIA_BUS_FMT_SRGGB10_1X10:
-	case MEDIA_BUS_FMT_SGRBG10_1X10:
-	case MEDIA_BUS_FMT_SGBRG10_1X10:
-	case MEDIA_BUS_FMT_SBGGR10_1X10:
-		return imx219_write_regs(imx219, raw10_framefmt_regs,
-					ARRAY_SIZE(raw10_framefmt_regs));
+		return 0;
 	}
 
 	return -EINVAL;
@@ -1050,14 +927,6 @@ static int imx219_set_binning(struct imx219 *imx219)
 		return imx219_write_reg(imx219, IMX219_REG_BINNING_MODE,
 					IMX219_REG_VALUE_16BIT,
 					IMX219_BINNING_2X2_ANALOG);
-
-	case MEDIA_BUS_FMT_SRGGB10_1X10:
-	case MEDIA_BUS_FMT_SGRBG10_1X10:
-	case MEDIA_BUS_FMT_SGBRG10_1X10:
-	case MEDIA_BUS_FMT_SBGGR10_1X10:
-		return imx219_write_reg(imx219, IMX219_REG_BINNING_MODE,
-					IMX219_REG_VALUE_16BIT,
-					IMX219_BINNING_2X2);
 	}
 
 	return -EINVAL;
@@ -1424,12 +1293,13 @@ static int imx219_init_controls(struct imx219 *imx219)
 					   V4L2_CID_VBLANK, IMX219_VBLANK_MIN,
 					   IMX219_VTS_MAX - height, 1,
 					   imx219->mode->vts_def - height);
-	hblank = IMX219_PPL_MIN - imx219->mode->width;
+	hblank = IMX219_HTOTAL_CON - imx219->mode->width;
 	imx219->hblank = v4l2_ctrl_new_std(ctrl_hdlr, &imx219_ctrl_ops,
 					   V4L2_CID_HBLANK, hblank, hblank,
 					   1, hblank);
 	if (imx219->hblank)
 		imx219->hblank->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+
 	exposure_max = imx219->mode->vts_def - 4;
 	exposure_def = (exposure_max < IMX219_EXPOSURE_DEFAULT) ?
 		exposure_max : IMX219_EXPOSURE_DEFAULT;
