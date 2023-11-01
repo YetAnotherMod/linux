@@ -120,8 +120,8 @@
 #define MDLERRCNT_REG		0x0090
 #define FIFOSTATUS_REG		0x00F8
 
-//#undef MCLK_ENABLE
-#define MCLK_ENABLE
+#undef MCLK_ENABLE
+//#define MCLK_ENABLE
 
 static const struct v4l2_mbus_framefmt tc358748_def_sink_fmt = {
 	.width		= (640/3)*3 + 640%3, // X_rx = X_tx * 3 = 214 * 3 = 642 ?
@@ -404,7 +404,8 @@ static int tc358748_read(struct tc358748_dev *bridge, u16 reg, u32 *val)
 			return ret < 0 ? ret : -EIO;
 	}
 
-printk("TC358748 R: addr(0x%x), reg%d (0x%x), val%d (0x%x).\n", client->addr, 2, reg, 2, *val);
+	dev_dbg(&client->dev, "TC358748 R: addr(0x%x), reg%d (0x%x), val%d (0x%x).\n",
+		client->addr, 2, reg, 2, *val);
 
 	return 0;
 }
@@ -429,7 +430,8 @@ static int tc358748_write(struct tc358748_dev *bridge, u16 reg, u32 val)
 			return ret < 0 ? ret : -EIO;
 	}
 
-printk("TC358748 W: addr(0x%x), reg%d (0x%x), val%d (0x%x).\n", client->addr, 2, reg, 2, val);
+	dev_dbg(&client->dev, "TC358748 W: addr(0x%x), reg%d (0x%x), val%d (0x%x).\n",
+		client->addr, 2, reg, 2, val);
 			
 	return 0;
 }               
@@ -668,7 +670,7 @@ static int tc358748_find_pll_settings(struct tc358748_dev *bridge, struct v4l2_s
 	u16 p_best, p;
 	u8 postdiv;
 	unsigned int div[] = {8, 4, 2};
-	int ret, ppi, par;
+	int ppi, par;
 
 	csi_lanes = bridge->rx.bus.mipi_csi2.num_data_lanes;
 	csi_rate = (unsigned long)bridge->rx.link_frequencies[0];

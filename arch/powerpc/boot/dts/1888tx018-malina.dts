@@ -368,7 +368,7 @@
 					//vddio-supply = <&v1_8d>;
 					//vddmipi-supply = <&v1_2d>;
 					//reset-gpios = <&gpio 2 GPIO_ACTIVE_LOW>;
-					mclk-rate = <24000000>;
+					//mclk-rate = <24000000>;
 
 					ports {
 						#address-cells = <1>;

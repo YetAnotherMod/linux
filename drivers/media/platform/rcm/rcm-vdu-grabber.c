@@ -37,7 +37,7 @@
 
 #include "rcm-vdu-grabber.h"
 
-#define RCM_VDU_GRB_DBG
+#undef RCM_VDU_GRB_DBG
 
 #ifdef RCM_VDU_GRB_DBG
 	#define GRB_DBG_PRINT(...) printk( KERN_DEBUG "[VDU_GRABBER] " __VA_ARGS__ )
