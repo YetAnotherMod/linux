@@ -166,6 +166,7 @@
 		unsigned int code;
 		unsigned int bpp;
 		u32 pixelformat;
+		int fmt_default;
 	};
 
 

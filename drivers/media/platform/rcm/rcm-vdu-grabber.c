@@ -52,11 +52,12 @@ enum {
 	RCM_VDU_GRB_NR_PADS
 };
 
-static const struct v4l2_pix_format fmt_default = {
+static const struct v4l2_pix_format fmt_default[] = {
+ { // 0
 	.width 		= XGA_WIDTH,
 	.height 	= XGA_HEIGHT,
-	.pixelformat 	= V4L2_PIX_FMT_YUV422P,
 	.field 		= V4L2_FIELD_NONE,
+	.pixelformat	= -1,
 	.colorspace 	= V4L2_COLORSPACE_DEFAULT,
 	.bytesperline   = XGA_WIDTH,
 	.sizeimage	= XGA_WIDTH * XGA_HEIGHT * 2,
@@ -65,8 +66,53 @@ static const struct v4l2_pix_format fmt_default = {
 	.priv		= 0,
 	.flags		= 0,
 	.xfer_func	= V4L2_XFER_FUNC_DEFAULT,
+ },
+ { // 1
+	.width		= XGA_WIDTH,
+	.height		= XGA_HEIGHT,
+	.field		= V4L2_FIELD_NONE,
+	.pixelformat	= -1,
+	.colorspace	= V4L2_COLORSPACE_DEFAULT,
+	.bytesperline	= XGA_WIDTH * 4,
+	.sizeimage	= XGA_WIDTH * XGA_HEIGHT * 4,
+	.ycbcr_enc	= V4L2_YCBCR_ENC_DEFAULT,
+	.quantization	= V4L2_QUANTIZATION_DEFAULT,
+	.priv		= 0,
+	.flags		= 0,
+	.xfer_func	= V4L2_XFER_FUNC_DEFAULT,
+ },
+ { // 2
+
+	.width		= XGA_WIDTH,
+	.height		= XGA_HEIGHT,
+	.field		= V4L2_FIELD_NONE,
+	.pixelformat	= -1,
+	.colorspace	= V4L2_COLORSPACE_DEFAULT,
+	.bytesperline	= XGA_WIDTH * 3,
+	.sizeimage	= XGA_WIDTH * XGA_HEIGHT * 3,
+	.ycbcr_enc	= V4L2_YCBCR_ENC_DEFAULT,
+	.quantization	= V4L2_QUANTIZATION_DEFAULT,
+	.priv		= 0,
+	.flags		= 0,
+	.xfer_func	= V4L2_XFER_FUNC_DEFAULT,
+ },
+ { // 3
+	.width		= VGA_WIDTH,
+	.height		= VGA_HEIGHT,
+	.field		= V4L2_FIELD_NONE,
+	.pixelformat	= -1,
+	.colorspace	= V4L2_COLORSPACE_DEFAULT,
+	.bytesperline	= ((VGA_WIDTH + 2)/3)*4,
+	.sizeimage	= ((VGA_WIDTH + 2)/3)*4*VGA_HEIGHT,
+	.ycbcr_enc	= V4L2_YCBCR_ENC_DEFAULT,
+	.quantization	= V4L2_QUANTIZATION_DEFAULT,
+	.priv		= 0,
+	.flags		= 0,
+	.xfer_func	= V4L2_XFER_FUNC_DEFAULT,
+ },
 };
 
+// See vidioc_enum_fmt_vid_cap_grb
 static const struct grb_pix_map grb_pix_map_list[] = {
 	/* TODO: add all missing formats */
 
@@ -75,48 +121,57 @@ static const struct grb_pix_map grb_pix_map_list[] = {
 		.code = MEDIA_BUS_FMT_ARGB8888_1X32, // without alpha, HW add 
 		.pixelformat = V4L2_PIX_FMT_BGR32,
 		.bpp = 4,
+		.fmt_default = 1,
 	},
 	{ // 1
 		.code = MEDIA_BUS_FMT_RGB888_1X24,
 		.pixelformat = V4L2_PIX_FMT_RGB24, // 3 planes, no packed 
 		.bpp = 3,
+		.fmt_default = 2,
 	},
 	/* YCBCR formats */
 	{ // 2
 		.code = MEDIA_BUS_FMT_UYVY8_2X8,
 		.pixelformat = V4L2_PIX_FMT_YUV422P,
 		.bpp = 2,
+		.fmt_default = 0,
 	},
 	{ // 3
 		.code = MEDIA_BUS_FMT_UYVY8_1X16,
 		.pixelformat = V4L2_PIX_FMT_NV16,
 		.bpp = 2,
+		.fmt_default = 0,
 	},
-	{
+	{ // 4
 		.code = MEDIA_BUS_FMT_UYVY8_2X8,
 		.pixelformat = V4L2_PIX_FMT_NV12,
 		.bpp = 2,
+		.fmt_default = 0,
 	},
 	/* Bayer formats */
-	{ // 4
+	{ // 5
 		.code = MEDIA_BUS_FMT_SBGGR8_1X8,
 		.pixelformat = V4L2_PIX_FMT_SBGGR8,
 		.bpp = 1,
+		.fmt_default = 3,
 	},
-	{ // 5
+	{ // 6
 		.code = MEDIA_BUS_FMT_SGRBG8_1X8,
 		.pixelformat = V4L2_PIX_FMT_SGRBG8,
 		.bpp = 1,
+		.fmt_default = 3,
 	},
-	{ // 6
+	{ // 7
 		.code = MEDIA_BUS_FMT_SGBRG8_1X8,
 		.pixelformat = V4L2_PIX_FMT_SGBRG8,
 		.bpp = 1,
+		.fmt_default = 3,
 	},
-	{ // 7
+	{ // 8
 		.code = MEDIA_BUS_FMT_SRGGB8_1X8,
 		.pixelformat = V4L2_PIX_FMT_SRGGB8,
 		.bpp = 1,
+		.fmt_default = 3,
 	},
 };
 
@@ -390,15 +445,15 @@ static int set_output_format( struct grb_info *grb ) {
 		grb->out_f.c_full_size = pix_fmt->bytesperline;
 		GRB_DBG_PRINT( "output pixelformat: YCBCR422 two planes\n" );
 		break;
-    case V4L2_PIX_FMT_NV12:                                     // 'NV12'
-        grb->out_f.format_dout = 0x04;
-        grb->out_f.color = YCBCR;
-        grb->out_f.y_full_size = pix_fmt->bytesperline * 2;
-        grb->out_f.c_hor_size = pix_fmt->width;
-        grb->out_f.c_ver_size = pix_fmt->height;
-        grb->out_f.c_full_size = pix_fmt->bytesperline;
-        GRB_DBG_PRINT( "output pixelformat: YCBCR420 two planes\n" );
-        break;
+	case V4L2_PIX_FMT_NV12:                                     // 'NV12'
+		grb->out_f.format_dout = 0x04;
+		grb->out_f.color = YCBCR;
+		grb->out_f.y_full_size = pix_fmt->bytesperline * 2;
+		grb->out_f.c_hor_size = pix_fmt->width;
+		grb->out_f.c_ver_size = pix_fmt->height;
+		grb->out_f.c_full_size = pix_fmt->bytesperline;
+		GRB_DBG_PRINT( "output pixelformat: YCBCR420 two planes\n" );
+		break;
 	case V4L2_PIX_FMT_YUV422P:									// '422P'='Y42B'
 		grb->out_f.format_dout = 0x06;
 		grb->out_f.color = YCBCR;
@@ -436,7 +491,7 @@ static int set_output_format( struct grb_info *grb ) {
 		 (grb->out_f.c_hor_size > grb->out_f.c_full_size) ) {
 		GRB_DBG_PRINT( "output size mismatch!\n" );
 		return -EINVAL;
-	} 
+	}
 	return 0;
 }
 
@@ -462,7 +517,7 @@ static int setup_color( struct grb_info *grb, void __iomem* base_addr ) {
 			if( color_std_out == STD_CLR_SD ) {
 				GRB_DBG_PRINT( "RGB->YCBCR,SD\n" );
 				grb->c_conv = &RGB_TO_YCBCR_SD;
-			} 
+			}
 			else {
 				GRB_DBG_PRINT( "RGB->YCBCR,HD\n" );
 				grb->c_conv = &RGB_TO_YCBCR_HD;
@@ -472,7 +527,7 @@ static int setup_color( struct grb_info *grb, void __iomem* base_addr ) {
 			if( color_std_in == STD_CLR_SD ) {
 				GRB_DBG_PRINT( "YCBCR->RGB,SD\n" );
 				grb->c_conv = &YCBCR_TO_RGB_SD;
-			} 
+			}
 			else {
 				GRB_DBG_PRINT( "YCBCR->RGB,HD\n" );
 				grb->c_conv = &YCBCR_TO_RGB_HD;
@@ -497,7 +552,7 @@ static int setup_color( struct grb_info *grb, void __iomem* base_addr ) {
 		GRB_DBG_PRINT( "not need color conversion\n" );
 		grb->c_conv = NULL;
 	}
-	
+
 	write_register( 0, base_addr, ADDR_CONV_ENABLE );
 
 	if( grb->c_conv ) {
@@ -540,7 +595,7 @@ static void setup_gamma( void __iomem* base_addr, struct grb_gamma *gam ) {
 				write_register( vY_G, base_addr, BASE_ADDR_TABLE_0+i );		// dv0( Y,G)
 				write_register( vC_R, base_addr, BASE_ADDR_TABLE_1+i );		// dv1(Cr,R)
 				write_register( vC_B, base_addr, BASE_ADDR_TABLE_2+i );		// dv2(Cb,B)
-				
+
 		}
 		//GRB_DBG_PRINT( "init gamma table, last word yg=%08x, cr=%08x, cb=%08x\n",
 		//			   read_register( base_addr, BASE_ADDR_TABLE_0+252 ),
@@ -689,7 +744,7 @@ int setup_registers( struct grb_info *grb ) {
 
 	grb->mem_offset1 = y_full_size*y_ver_size;									// plane for color component 1
 	grb->mem_offset2 = grb->mem_offset1 + c_full_size*c_ver_size;				// plane for color component 2
-	
+
 	GRB_DBG_PRINT( "y_hor_size=%d,y_ver_size=%d,c_hor_size=%d,c_ver_size=%d,y_full_size=%d,c_full_size=%d,mem_offset1=%d,mem_offset2=%d,alpha=%d\n",
 			 y_hor_size, y_ver_size, c_hor_size, c_ver_size, y_full_size, c_full_size,
 			 grb->mem_offset1, grb->mem_offset2, grb->param.alpha );
@@ -726,7 +781,7 @@ int setup_registers( struct grb_info *grb ) {
 	setup_gamma( base_addr, &grb->gam );
 	setup_color( grb, base_addr );
 	set_register( INT_BIT_END_WRITE, base_addr, ADDR_INT_MASK  );
-	
+
 	capture_start(grb);
 
 	return 0;
@@ -767,7 +822,7 @@ static int queue_setup(struct vb2_queue *vq,
 
 	if( *nbuffers >  16 )
 		*nbuffers = 16;
-	
+
 	if( *nbuffers > max_buff )
 		*nbuffers = max_buff;
 
@@ -897,7 +952,7 @@ static int buffer_fill_all(struct grb_info *grb)
 			goto unlock_irq;
 		}
 	}
-unlock_irq:	
+unlock_irq:
 	spin_unlock_irqrestore(&grb->irq_lock, flags);
 	return ret;
 }
@@ -970,10 +1025,13 @@ static void return_all_buffers(struct grb_info *grb, enum vb2_buffer_state state
 	spin_unlock_irqrestore(&grb->irq_lock, flags);
 }
 
+static void grb_try_compose(struct grb_info *, struct v4l2_rect *);
+
 static void buffer_finish(struct vb2_buffer *vb)
 {
 	struct grb_info *grb = vb2_get_drv_priv(vb->vb2_queue);
 	struct v4l2_pix_format *pix_fmt = &grb->format.fmt.pix;
+	struct v4l2_rect rect;
 	void *mem = vb2_plane_vaddr(vb, 0);
 	unsigned long frame_full_size, y_hor_size, y_full_size;
 	unsigned long y_ver_size, origin_size;
@@ -994,6 +1052,9 @@ static void buffer_finish(struct vb2_buffer *vb)
 	    (pix_fmt->pixelformat != V4L2_PIX_FMT_SGRBG8) && (pix_fmt->pixelformat != V4L2_PIX_FMT_SRGGB8))
 		return;
 
+	rect = grb->cropping;
+	grb_try_compose(grb, &rect);
+
 	frame_full_size = vb2_get_plane_payload(vb, 0);
 	y_hor_size = grb->out_f.y_hor_size *4;
 	y_full_size = grb->out_f.y_full_size*4;
@@ -1005,13 +1066,15 @@ static void buffer_finish(struct vb2_buffer *vb)
 
 	if (origin_size > pix_fmt->width)
 		origin_size = pix_fmt->width;
+	if (origin_size > rect.width)
+		origin_size = rect.width;
 
 	for (i = 0; i < y_ver_size; i++) {
 		for (k = 0, j = 0; j < y_hor_size && k < origin_size; j+=4, k+=3) {
 			unsigned char tmp[3];
 
 			tmp[0] = *((unsigned char *)(mem + y_full_size*i + j + 0));
-			tmp[1] = *((unsigned char *)(mem + y_full_size*i + j + 1)); 
+			tmp[1] = *((unsigned char *)(mem + y_full_size*i + j + 1));
 			tmp[2] = *((unsigned char *)(mem + y_full_size*i + j + 2));
 
 			*((unsigned char *)(mem + origin_size*i + k + 0)) = tmp[2];
@@ -1022,7 +1085,7 @@ static void buffer_finish(struct vb2_buffer *vb)
 
 	vb2_set_plane_payload(vb, 0, y_ver_size*origin_size);
 
-	return; 
+	return;
 }
 
 static void buffer_cleanup(struct vb2_buffer *vb)
@@ -1270,8 +1333,8 @@ static int vidioc_fmt( struct grb_info *grb, struct v4l2_format *f ) {
 		return -EINVAL;
 }
 
-static int vidioc_enum_fmt_vid_cap_grb( struct file *file, void *fh, struct v4l2_fmtdesc *fmt ) {
-	
+static int vidioc_enum_fmt_vid_cap_grb( struct file *file, void *fh, struct v4l2_fmtdesc *fmt )
+{
 	if( fmt->type != V4L2_BUF_TYPE_VIDEO_CAPTURE )
 		return -EINVAL;
 
@@ -1296,36 +1359,36 @@ static int vidioc_enum_fmt_vid_cap_grb( struct file *file, void *fh, struct v4l2
 		strlcpy( fmt->description, "YUV 4:2:2", sizeof(fmt->description) );
 		fmt->pixelformat = v4l2_fourcc( 'N','V','1', '6' );
 		break;
-	case 4:
+	case 4: // V4L2_PIX_FMT_NV12
+		fmt->flags = 0;
+		strlcpy( fmt->description, "YUV 4:2:0", sizeof(fmt->description) );
+		fmt->pixelformat = v4l2_fourcc( 'N','V','1', '2' );
+		break;
+	case 5:
 		fmt->flags = 0;
 		strlcpy(fmt->description, "BGGR8", sizeof(fmt->description));
 		fmt->pixelformat = v4l2_fourcc( 'B', 'A', '8', '1');
 		break;
-	case 5:
+	case 6:
 		fmt->flags = 0;
 		strlcpy(fmt->description, "GRBG8", sizeof(fmt->description));
 		fmt->pixelformat = v4l2_fourcc('G', 'R', 'B', 'G');
 		break;
-	case 6:
+	case 7:
 		fmt->flags = 0;
 		strlcpy(fmt->description, "GBRG8", sizeof(fmt->description));
 		fmt->pixelformat = v4l2_fourcc('G', 'B', 'R', 'G');
 		break;
-	case 7:
+	case 8:
 		fmt->flags = 0;
 		strlcpy(fmt->description, "RGGB8", sizeof(fmt->description));
 		fmt->pixelformat = v4l2_fourcc('R', 'G', 'G', 'B');
 		break;
-	case 8: // V4L2_PIX_FMT_YUV444M Planar formats with full horizontal resolution, also known as YUV and YVU 4:4:4
+	case 9: // V4L2_PIX_FMT_YUV444M Planar formats with full horizontal resolution, also known as YUV and YVU 4:4:4
 		fmt->flags = 0;
 		strlcpy( fmt->description, "YUV 4:4:4", sizeof(fmt->description) );
 		fmt->pixelformat = v4l2_fourcc( 'Y','M','2', '4' );
 		break;
-    case 9: // V4L2_PIX_FMT_NV12
-            fmt->flags = 0;
-            strlcpy( fmt->description, "YUV 4:2:0", sizeof(fmt->description) );
-            fmt->pixelformat = v4l2_fourcc( 'N','V','1', '2' );
-            break;
 	default:
 		return -EINVAL;
 	}
@@ -1338,6 +1401,7 @@ static int grb_try_fmt(struct grb_info *grb, struct v4l2_format *f, u32 *code)
 	const struct grb_pix_map *vpix;
 	struct v4l2_pix_format *pixfmt = &f->fmt.pix;
 //	struct v4l2_subdev_format sd_fmt;
+	int fmt_index;
 
 	if (f->type != V4L2_BUF_TYPE_VIDEO_CAPTURE) {
 		GRB_DBG_PRINT( "Incorrect format type!\n" );
@@ -1347,12 +1411,14 @@ static int grb_try_fmt(struct grb_info *grb, struct v4l2_format *f, u32 *code)
 	/* Don't accept a pixelformat that is not on the table */
 	vpix = grb_pix_map_by_pixelformat(pixfmt->pixelformat);
 	if (!vpix) {
-		pixfmt->pixelformat = fmt_default.pixelformat;
+		vpix = grb_pix_map_by_pixelformat(V4L2_PIX_FMT_YUV422P);
+		pixfmt->pixelformat = vpix->pixelformat;
 		GRB_DBG_PRINT("%s: pixelformat not found. use default\n", __func__);
 	}
+	fmt_index = vpix->fmt_default;
 
 	if (pixfmt->field == V4L2_FIELD_ANY) {
-		pixfmt->field = fmt_default.field;
+		pixfmt->field = fmt_default[fmt_index].field;
 		GRB_DBG_PRINT("%s: use default field\n", __func__);
 	}
 
@@ -1365,13 +1431,13 @@ static int grb_try_fmt(struct grb_info *grb, struct v4l2_format *f, u32 *code)
 		pixfmt->height = RCM_GRB_MAX_SUPPORT_HEIGHT;
 		GRB_DBG_PRINT("%s: set RCM_GRB_MAX_SUPPORT_HEIGHT\n", __func__);
 	}
-	
+
 	if (pixfmt->width < RCM_GRB_MIN_SUPPORT_WIDTH) {
-		pixfmt->width = fmt_default.width;
+		pixfmt->width = fmt_default[fmt_index].width;
 		GRB_DBG_PRINT("%s: set fmt_default.width (%d)\n", __func__, pixfmt->width);
 	}
 	if (pixfmt->height < RCM_GRB_MIN_SUPPORT_HEIGHT) {
-		pixfmt->height = fmt_default.height;
+		pixfmt->height = fmt_default[fmt_index].height;
 		GRB_DBG_PRINT("%s: set fmt_default.height (%d)\n", __func__, pixfmt->height);
 	}
 	GRB_DBG_PRINT("%s: cur size %dX%d\n", __func__, pixfmt->width, pixfmt->height);
@@ -1414,7 +1480,7 @@ static int grb_try_fmt(struct grb_info *grb, struct v4l2_format *f, u32 *code)
 		pixfmt->bytesperline = pixfmt->width;
 		pixfmt->sizeimage    = pixfmt->bytesperline*pixfmt->height*3;
 		break;
-	case V4L2_PIX_FMT_NV12:		
+	case V4L2_PIX_FMT_NV12:
 	case V4L2_PIX_FMT_NV16:
 	case V4L2_PIX_FMT_YUV422P:
 		pixfmt->bytesperline = pixfmt->width;
@@ -2106,7 +2172,7 @@ static int test_interrupt( struct grb_info *grb ) {	// test interrupt started,ha
 	return 0;
 }
 
-static int grb_set_default_fmt(struct grb_info *grb, const struct v4l2_pix_format *fmt)
+static int grb_set_default_fmt(struct grb_info *grb, const struct v4l2_pix_format *fmt, unsigned int pixelformat)
 {
 	struct v4l2_format f = {
 		.type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
@@ -2114,6 +2180,7 @@ static int grb_set_default_fmt(struct grb_info *grb, const struct v4l2_pix_forma
 	int ret;
 
 	f.fmt.pix = *fmt;
+	f.fmt.pix.pixelformat = pixelformat;
 
 	ret = grb_try_fmt(grb, &f, NULL);
 	if (ret) {
@@ -2134,6 +2201,7 @@ static int device_probe( struct platform_device *pdev ) {
 	struct grb_info *grb;
 	struct resource* res;
 	struct vb2_queue *q;
+	unsigned int val;
 	int i, err;
 
 	grb = devm_kzalloc(&pdev->dev, sizeof(struct grb_info), GFP_KERNEL);
@@ -2200,15 +2268,43 @@ static int device_probe( struct platform_device *pdev ) {
 	//grb->video_dev.tvnorms = V4L2_STD_ATSC_8_VSB + V4L2_STD_ATSC_16_VSB;
 
 	grb->param.sync = SYNC_EXTERNAL;
-	grb->param.std_in = STD_CLR_SD;
-	grb->param.v_if = V_IF_SERIAL;
-	grb->param.d_format = D_FMT_YCBCR422;
-	grb->param.std_out = STD_CLR_SD;
+
+	err = of_property_read_u32(pdev->dev.of_node, "stdin", &val);
+	if (err || (val < grb_stdin.min) || (val > grb_stdin.max))
+		val = grb_stdin.def;
+	grb->param.std_in = val;
+
+	err = of_property_read_u32(pdev->dev.of_node, "dvif", &val);
+	if (err || (val < grb_dvif.min) || (val > grb_dvif.max))
+		val = grb_dvif.def;
+	grb->param.v_if = val;
+
+	err = of_property_read_u32(pdev->dev.of_node, "dformat", &val);
+	if (err || (val < grb_dformat.min) || (val > grb_dformat.max))
+		val = grb_dformat.def;
+	grb->param.d_format = val;
+
+	err = of_property_read_u32(pdev->dev.of_node, "stdout", &val);
+	if (err || (val < grb_stdout.min) || (val > grb_stdout.max))
+		val = grb_stdout.def;
+	grb->param.std_out = val;
+
 	grb->param.alpha = 255;
+
+	err = of_property_read_u32(pdev->dev.of_node, "pixelformat", &val);
+	if (err || (val >= ARRAY_SIZE(grb_pix_map_list))) {
+		const struct grb_pix_map *tmp;
+		tmp = grb_pix_map_by_pixelformat(V4L2_PIX_FMT_YUV422P);
+		i = tmp->fmt_default;
+		val = tmp->pixelformat;
+	}
+	else {
+		i = grb_pix_map_list[val].fmt_default;
+		val = grb_pix_map_list[val].pixelformat;
+	}
+
 	set_input_format( grb );
-
-	grb_set_default_fmt(grb, &fmt_default);
-
+	grb_set_default_fmt(grb, &fmt_default[i], val);
 	set_output_format( grb );
 
 	grb->cropping.left = 0;

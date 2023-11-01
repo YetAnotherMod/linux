@@ -533,6 +533,13 @@
 
 			vdu_graber_ext0: vdu_grabber@0x38016000 {
 				status = "okay";
+
+				stdin = <0>;		// HD
+				stdout = <0>;		// HD
+				dformat = <2>;		// RGB888
+				dvif = <1>;		// Parallel
+				pixelformat = <8>;	// SRGGB8
+
 				port {
 						grab_ext_0: endpoint {
 								remote-endpoint = <&tc358748_out>;
@@ -548,6 +555,13 @@
 
 			vdu_graber_ext1: vdu_grabber@0x3801c000 {
 				status = "okay";
+
+				stdin = <1>;		// SD
+				stdout = <1>;		// SD
+				dformat = <0>;		// YUV422
+				dvif = <0>;		// Serial
+				pixelformat = <2>;	// YUV422P
+
 				port {
 						grab_ext_1: endpoint {
 								remote-endpoint = <&ov2640_0>;
