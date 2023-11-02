@@ -37,7 +37,7 @@
 
 #include "rcm-vdu-grabber.h"
 
-#undef RCM_VDU_GRB_DBG
+#define RCM_VDU_GRB_DBG
 
 #ifdef RCM_VDU_GRB_DBG
 	#define GRB_DBG_PRINT(...) printk( KERN_DEBUG "[VDU_GRABBER] " __VA_ARGS__ )
@@ -148,31 +148,38 @@ static const struct grb_pix_map grb_pix_map_list[] = {
 		.bpp = 2,
 		.fmt_default = 0,
 	},
-	/* Bayer formats */
 	{ // 5
+		.code = MEDIA_BUS_FMT_UYVY8_2X8,
+		.pixelformat = V4L2_PIX_FMT_YUV420,
+		.bpp = 2,
+		.fmt_default = 0,
+	},
+	/* Bayer formats */
+	{ // 6
 		.code = MEDIA_BUS_FMT_SBGGR8_1X8,
 		.pixelformat = V4L2_PIX_FMT_SBGGR8,
 		.bpp = 1,
 		.fmt_default = 3,
 	},
-	{ // 6
+	{ // 7
 		.code = MEDIA_BUS_FMT_SGRBG8_1X8,
 		.pixelformat = V4L2_PIX_FMT_SGRBG8,
 		.bpp = 1,
 		.fmt_default = 3,
 	},
-	{ // 7
+	{ // 8
 		.code = MEDIA_BUS_FMT_SGBRG8_1X8,
 		.pixelformat = V4L2_PIX_FMT_SGBRG8,
 		.bpp = 1,
 		.fmt_default = 3,
 	},
-	{ // 8
+	{ // 9
 		.code = MEDIA_BUS_FMT_SRGGB8_1X8,
 		.pixelformat = V4L2_PIX_FMT_SRGGB8,
 		.bpp = 1,
 		.fmt_default = 3,
 	},
+	/* FixMe: Missing YUV444 as #10, as seen in enum below */
 };
 
 const struct grb_pix_map *grb_pix_map_by_code(u32 code)
@@ -445,15 +452,15 @@ static int set_output_format( struct grb_info *grb ) {
 		grb->out_f.c_full_size = pix_fmt->bytesperline;
 		GRB_DBG_PRINT( "output pixelformat: YCBCR422 two planes\n" );
 		break;
-	case V4L2_PIX_FMT_NV12:                                     // 'NV12'
-		grb->out_f.format_dout = 0x04;
-		grb->out_f.color = YCBCR;
-		grb->out_f.y_full_size = pix_fmt->bytesperline * 2;
-		grb->out_f.c_hor_size = pix_fmt->width;
-		grb->out_f.c_ver_size = pix_fmt->height;
-		grb->out_f.c_full_size = pix_fmt->bytesperline;
-		GRB_DBG_PRINT( "output pixelformat: YCBCR420 two planes\n" );
-		break;
+    case V4L2_PIX_FMT_NV12:                                     // 'NV12'
+        grb->out_f.format_dout = 0x04;
+        grb->out_f.color = YCBCR;
+        grb->out_f.y_full_size = pix_fmt->bytesperline;
+        grb->out_f.c_hor_size = pix_fmt->width/2;
+        grb->out_f.c_ver_size = pix_fmt->height;
+        grb->out_f.c_full_size = pix_fmt->bytesperline/2;
+        GRB_DBG_PRINT( "output pixelformat: YCBCR420 two planes\n" );
+        break;
 	case V4L2_PIX_FMT_YUV422P:									// '422P'='Y42B'
 		grb->out_f.format_dout = 0x06;
 		grb->out_f.color = YCBCR;
@@ -462,6 +469,15 @@ static int set_output_format( struct grb_info *grb ) {
 		grb->out_f.c_ver_size = pix_fmt->height;
 		grb->out_f.c_full_size = pix_fmt->bytesperline/2;
 		GRB_DBG_PRINT( "output pixelformat: YCBCR422 three planes\n" );
+		break;
+	case V4L2_PIX_FMT_YUV420:									// 'YU12'
+		grb->out_f.format_dout = 0x06;
+		grb->out_f.color = YCBCR;
+		grb->out_f.y_full_size = pix_fmt->bytesperline;
+		grb->out_f.c_hor_size = pix_fmt->width/2;
+		grb->out_f.c_ver_size = pix_fmt->height/2;
+		grb->out_f.c_full_size = pix_fmt->bytesperline/4;
+		GRB_DBG_PRINT( "output pixelformat: YCBCR420 three planes\n" );
 		break;
 	case V4L2_PIX_FMT_YUV444M:									// 'YM24'
 		grb->out_f.format_dout = 0x0e;
@@ -718,7 +734,7 @@ int setup_registers( struct grb_info *grb ) {
 		grb->out_f.c_hor_size = r.width;
 		grb->out_f.c_ver_size = r.height;
 
-		if (format_dout == 0x6) {
+		if (format_dout == 0x06) {
 			grb->out_f.c_hor_size /= 2;
 			grb->out_f.c_full_size -= r.left/2;
 		}
@@ -1314,6 +1330,10 @@ static int vidioc_fmt( struct grb_info *grb, struct v4l2_format *f ) {
 			f->fmt.pix.sizeimage    = f->fmt.pix.bytesperline*f->fmt.pix.height*3;
 			break;
 		case V4L2_PIX_FMT_NV12:
+		case V4L2_PIX_FMT_YUV420:
+			f->fmt.pix.bytesperline = f->fmt.pix.width;
+			f->fmt.pix.sizeimage    = f->fmt.pix.bytesperline*f->fmt.pix.height*3/2;
+			break;
 		case V4L2_PIX_FMT_NV16:
 		case V4L2_PIX_FMT_YUV422P:
 			f->fmt.pix.bytesperline = f->fmt.pix.width;
@@ -1359,32 +1379,39 @@ static int vidioc_enum_fmt_vid_cap_grb( struct file *file, void *fh, struct v4l2
 		strlcpy( fmt->description, "YUV 4:2:2", sizeof(fmt->description) );
 		fmt->pixelformat = v4l2_fourcc( 'N','V','1', '6' );
 		break;
-	case 4: // V4L2_PIX_FMT_NV12
-		fmt->flags = 0;
-		strlcpy( fmt->description, "YUV 4:2:0", sizeof(fmt->description) );
-		fmt->pixelformat = v4l2_fourcc( 'N','V','1', '2' );
-		break;
-	case 5:
+    case 4: // V4L2_PIX_FMT_NV12 Planar formats with ½ horizontal and vertical chroma resolution, also known as YUV 4:2:0.
+			// The three components are separated into two sub-images or planes.
+        fmt->flags = 0;
+        strlcpy( fmt->description, "YUV 4:2:0", sizeof(fmt->description) );
+        fmt->pixelformat = v4l2_fourcc( 'N','V','1', '2' );
+        break;
+    case 5: // V4L2_PIX_FMT_YUV420 Planar formats with ½ horizontal and vertical chroma resolution, also known as YUV 4:2:0.
+			 // The three components are separated into three sub-images or planes.
+        fmt->flags = 0;
+        strlcpy( fmt->description, "YUV 4:2:0 three planes", sizeof(fmt->description) );
+        fmt->pixelformat = v4l2_fourcc( 'Y','U','1', '2' );
+        break;
+	case 6:
 		fmt->flags = 0;
 		strlcpy(fmt->description, "BGGR8", sizeof(fmt->description));
 		fmt->pixelformat = v4l2_fourcc( 'B', 'A', '8', '1');
 		break;
-	case 6:
+	case 7:
 		fmt->flags = 0;
 		strlcpy(fmt->description, "GRBG8", sizeof(fmt->description));
 		fmt->pixelformat = v4l2_fourcc('G', 'R', 'B', 'G');
 		break;
-	case 7:
+	case 8:
 		fmt->flags = 0;
 		strlcpy(fmt->description, "GBRG8", sizeof(fmt->description));
 		fmt->pixelformat = v4l2_fourcc('G', 'B', 'R', 'G');
 		break;
-	case 8:
+	case 9:
 		fmt->flags = 0;
 		strlcpy(fmt->description, "RGGB8", sizeof(fmt->description));
 		fmt->pixelformat = v4l2_fourcc('R', 'G', 'G', 'B');
 		break;
-	case 9: // V4L2_PIX_FMT_YUV444M Planar formats with full horizontal resolution, also known as YUV and YVU 4:4:4
+	case 10: // V4L2_PIX_FMT_YUV444M Planar formats with full horizontal resolution, also known as YUV and YVU 4:4:4
 		fmt->flags = 0;
 		strlcpy( fmt->description, "YUV 4:4:4", sizeof(fmt->description) );
 		fmt->pixelformat = v4l2_fourcc( 'Y','M','2', '4' );
@@ -1481,6 +1508,10 @@ static int grb_try_fmt(struct grb_info *grb, struct v4l2_format *f, u32 *code)
 		pixfmt->sizeimage    = pixfmt->bytesperline*pixfmt->height*3;
 		break;
 	case V4L2_PIX_FMT_NV12:
+	case V4L2_PIX_FMT_YUV420:
+		pixfmt->bytesperline = pixfmt->width;
+		pixfmt->sizeimage    = pixfmt->bytesperline*pixfmt->height*3/2;
+		break;
 	case V4L2_PIX_FMT_NV16:
 	case V4L2_PIX_FMT_YUV422P:
 		pixfmt->bytesperline = pixfmt->width;
