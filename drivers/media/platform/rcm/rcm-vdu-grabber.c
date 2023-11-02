@@ -745,8 +745,9 @@ int setup_registers( struct grb_info *grb ) {
 			grb->out_f.c_full_size -= r.left/2;
 		}
 		else if (grb->format.fmt.pix.pixelformat == V4L2_PIX_FMT_YUV420) {
-			grb->out_f.c_hor_size = r.width/4;
-			grb->out_f.c_full_size -= r.left/4;
+			grb->out_f.c_hor_size = r.width/2;
+			grb->out_f.c_full_size -= r.left/2;
+			grb->out_f.c_ver_size = r.height/2;
 		}
 		else {
 			grb->out_f.c_hor_size = r.width;
