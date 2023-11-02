@@ -110,6 +110,20 @@ static const struct v4l2_pix_format fmt_default[] = {
 	.flags		= 0,
 	.xfer_func	= V4L2_XFER_FUNC_DEFAULT,
  },
+ { // 4
+	.width		= XGA_WIDTH,
+	.height		= XGA_HEIGHT,
+	.field		= V4L2_FIELD_NONE,
+	.pixelformat	= -1,
+	.colorspace	= V4L2_COLORSPACE_DEFAULT,
+	.bytesperline	= XGA_WIDTH,
+	.sizeimage	= (XGA_WIDTH * XGA_HEIGHT * 3)/2,
+	.ycbcr_enc	= V4L2_YCBCR_ENC_DEFAULT,
+	.quantization	= V4L2_QUANTIZATION_DEFAULT,
+	.priv		= 0,
+	.flags		= 0,
+	.xfer_func	= V4L2_XFER_FUNC_DEFAULT,
+ },
 };
 
 // See vidioc_enum_fmt_vid_cap_grb
@@ -143,16 +157,16 @@ static const struct grb_pix_map grb_pix_map_list[] = {
 		.fmt_default = 0,
 	},
 	{ // 4
-		.code = MEDIA_BUS_FMT_UYVY8_2X8,
+		.code = MEDIA_BUS_FMT_UYVY8_1X16,
 		.pixelformat = V4L2_PIX_FMT_NV12,
 		.bpp = 2,
-		.fmt_default = 0,
+		.fmt_default = 4,
 	},
 	{ // 5
 		.code = MEDIA_BUS_FMT_UYVY8_2X8,
 		.pixelformat = V4L2_PIX_FMT_YUV420,
 		.bpp = 2,
-		.fmt_default = 0,
+		.fmt_default = 4,
 	},
 	/* Bayer formats */
 	{ // 6
@@ -181,18 +195,6 @@ static const struct grb_pix_map grb_pix_map_list[] = {
 	},
 	/* FixMe: Missing YUV444 as #10, as seen in enum below */
 };
-
-const struct grb_pix_map *grb_pix_map_by_code(u32 code)
-{
-	unsigned int i;
-
-	for (i = 0; i < ARRAY_SIZE(grb_pix_map_list); i++) {
-		if (grb_pix_map_list[i].code == code)
-			return &grb_pix_map_list[i];
-	}
-
-	return NULL;
-}
 
 const struct grb_pix_map *grb_pix_map_by_pixelformat(u32 pixelformat)
 {
@@ -394,8 +396,8 @@ static int set_input_format( struct grb_info *grb ) {
 	grb->in_f.format_din = format_data;			// 1–RGB,0-YCbCr
 	grb->in_f.format_din |= (active_bus << 1) ;	// 1–dv0;2–dv0,dv1;3–dv0,dv1,dv2
 							//
-	//if ( active_bus != 1 )
-	grb->in_f.format_din |= (param->std_in << 3) ;	// 0-not duplication,1–duplication (SDTV)
+//	if ( active_bus != 1 ) //Apply it after fix Hsync 
+		grb->in_f.format_din |= (param->std_in << 3) ;	// 0-not duplication,1–duplication (SDTV)
 
 	grb->in_f.format_din |= (param->sync << 4) ;	// synchronization: 0–external(hsync,vsync,field,data_enable); 1–internal(EAV,SAV)
 
@@ -452,13 +454,13 @@ static int set_output_format( struct grb_info *grb ) {
 		grb->out_f.c_full_size = pix_fmt->bytesperline;
 		GRB_DBG_PRINT( "output pixelformat: YCBCR422 two planes\n" );
 		break;
-    case V4L2_PIX_FMT_NV12:                                     // 'NV12'
-        grb->out_f.format_dout = 0x04;
-        grb->out_f.color = YCBCR;
-        grb->out_f.y_full_size = pix_fmt->bytesperline;
-        grb->out_f.c_hor_size = pix_fmt->width/2;
-        grb->out_f.c_ver_size = pix_fmt->height;
-        grb->out_f.c_full_size = pix_fmt->bytesperline/2;
+	case V4L2_PIX_FMT_NV12:										// 'NV12'
+		grb->out_f.format_dout = 0x04;
+		grb->out_f.color = YCBCR;
+		grb->out_f.y_full_size = pix_fmt->bytesperline;
+		grb->out_f.c_hor_size = pix_fmt->width/2;
+		grb->out_f.c_ver_size = pix_fmt->height;
+		grb->out_f.c_full_size = pix_fmt->bytesperline/2;
         GRB_DBG_PRINT( "output pixelformat: YCBCR420 two planes\n" );
         break;
 	case V4L2_PIX_FMT_YUV422P:									// '422P'='Y42B'
@@ -474,8 +476,8 @@ static int set_output_format( struct grb_info *grb ) {
 		grb->out_f.format_dout = 0x06;
 		grb->out_f.color = YCBCR;
 		grb->out_f.y_full_size = pix_fmt->bytesperline;
-		grb->out_f.c_hor_size = pix_fmt->width/2;
-		grb->out_f.c_ver_size = pix_fmt->height/2;
+		grb->out_f.c_hor_size = pix_fmt->width/4;
+		grb->out_f.c_ver_size = pix_fmt->height;
 		grb->out_f.c_full_size = pix_fmt->bytesperline/4;
 		GRB_DBG_PRINT( "output pixelformat: YCBCR420 three planes\n" );
 		break;
@@ -731,15 +733,25 @@ int setup_registers( struct grb_info *grb ) {
 	{
 		grb->out_f.y_hor_size = r.width;
 		grb->out_f.y_ver_size = r.height;
-		grb->out_f.c_hor_size = r.width;
+
 		grb->out_f.c_ver_size = r.height;
 
-		if (format_dout == 0x06) {
-			grb->out_f.c_hor_size /= 2;
+		if (grb->format.fmt.pix.pixelformat == V4L2_PIX_FMT_YUV422P) {
+			grb->out_f.c_hor_size = r.width/2;
 			grb->out_f.c_full_size -= r.left/2;
 		}
-		else
+		else if (grb->format.fmt.pix.pixelformat == V4L2_PIX_FMT_NV12) {
+			grb->out_f.c_hor_size = r.width/2;
+			grb->out_f.c_full_size -= r.left/2;
+		}
+		else if (grb->format.fmt.pix.pixelformat == V4L2_PIX_FMT_YUV420) {
+			grb->out_f.c_hor_size = r.width/4;
+			grb->out_f.c_full_size -= r.left/4;
+		}
+		else {
+			grb->out_f.c_hor_size = r.width;
 			grb->out_f.c_full_size -= r.left;
+		}
 
 		grb->out_f.y_full_size -= r.left;
 
@@ -1332,7 +1344,7 @@ static int vidioc_fmt( struct grb_info *grb, struct v4l2_format *f ) {
 		case V4L2_PIX_FMT_NV12:
 		case V4L2_PIX_FMT_YUV420:
 			f->fmt.pix.bytesperline = f->fmt.pix.width;
-			f->fmt.pix.sizeimage    = f->fmt.pix.bytesperline*f->fmt.pix.height*3/2;
+			f->fmt.pix.sizeimage    = (f->fmt.pix.bytesperline*f->fmt.pix.height*3)/2;
 			break;
 		case V4L2_PIX_FMT_NV16:
 		case V4L2_PIX_FMT_YUV422P:
@@ -1361,36 +1373,36 @@ static int vidioc_enum_fmt_vid_cap_grb( struct file *file, void *fh, struct v4l2
 	switch( fmt->index ) {
 	case 0: // V4L2_PIX_FMT_BGR32
 		fmt->flags = 0;
-		strlcpy( fmt->description, "ARGB8888", sizeof(fmt->description) );
+		strlcpy( fmt->description, "ARGB8888 one plane", sizeof(fmt->description) );
 		fmt->pixelformat = v4l2_fourcc( 'B','G','R', '4' );
 		break;
 	case 1: // V4L2_PIX_FMT_RGB24
 		fmt->flags = 0;
-		strlcpy(fmt->description, "RGB888", sizeof(fmt->description));
+		strlcpy(fmt->description, "RGB888 three planes", sizeof(fmt->description));
 		fmt->pixelformat = v4l2_fourcc('R', 'G', 'B', '3');
 		break;
 	case 2: // V4L2_PIX_FMT_YUV422P The three components are separated into three sub-images or planes. Cb,Cr two pixel.
 		fmt->flags = 0;
-		strlcpy( fmt->description, "YUV 4:2:2", sizeof(fmt->description) );
+		strlcpy( fmt->description, "YUV 4:2:2 three planes", sizeof(fmt->description) );
 		fmt->pixelformat = v4l2_fourcc( '4','2','2', 'P' );
 		break;
 	case 3: // V4L2_PIX_FMT_NV16,format with ½ horizontal chroma resolution, also known as YUV 4:2:2. One luminance and one chrominance plane.
 		fmt->flags = 0;
-		strlcpy( fmt->description, "YUV 4:2:2", sizeof(fmt->description) );
+		strlcpy( fmt->description, "YUV 4:2:2 two planes", sizeof(fmt->description) );
 		fmt->pixelformat = v4l2_fourcc( 'N','V','1', '6' );
 		break;
-    case 4: // V4L2_PIX_FMT_NV12 Planar formats with ½ horizontal and vertical chroma resolution, also known as YUV 4:2:0.
+	case 4: // V4L2_PIX_FMT_NV12 Planar formats with ½ horizontal and vertical chroma resolution, also known as YUV 4:2:0.
 			// The three components are separated into two sub-images or planes.
-        fmt->flags = 0;
-        strlcpy( fmt->description, "YUV 4:2:0", sizeof(fmt->description) );
-        fmt->pixelformat = v4l2_fourcc( 'N','V','1', '2' );
-        break;
-    case 5: // V4L2_PIX_FMT_YUV420 Planar formats with ½ horizontal and vertical chroma resolution, also known as YUV 4:2:0.
-			 // The three components are separated into three sub-images or planes.
-        fmt->flags = 0;
-        strlcpy( fmt->description, "YUV 4:2:0 three planes", sizeof(fmt->description) );
-        fmt->pixelformat = v4l2_fourcc( 'Y','U','1', '2' );
-        break;
+		fmt->flags = 0;
+		strlcpy( fmt->description, "YUV 4:2:0 two planes", sizeof(fmt->description) );
+		fmt->pixelformat = v4l2_fourcc( 'N','V','1', '2' );
+		break;
+	case 5: // V4L2_PIX_FMT_YUV420 Planar formats with ½ horizontal and vertical chroma resolution, also known as YUV 4:2:0.
+			// The three components are separated into three sub-images or planes.
+		fmt->flags = 0;
+		strlcpy( fmt->description, "YUV 4:2:0 three planes", sizeof(fmt->description) );
+		fmt->pixelformat = v4l2_fourcc( 'Y','U','1', '2' );
+		break;
 	case 6:
 		fmt->flags = 0;
 		strlcpy(fmt->description, "BGGR8", sizeof(fmt->description));
@@ -1510,7 +1522,7 @@ static int grb_try_fmt(struct grb_info *grb, struct v4l2_format *f, u32 *code)
 	case V4L2_PIX_FMT_NV12:
 	case V4L2_PIX_FMT_YUV420:
 		pixfmt->bytesperline = pixfmt->width;
-		pixfmt->sizeimage    = pixfmt->bytesperline*pixfmt->height*3/2;
+		pixfmt->sizeimage    = (pixfmt->bytesperline*pixfmt->height*3)/2;
 		break;
 	case V4L2_PIX_FMT_NV16:
 	case V4L2_PIX_FMT_YUV422P:

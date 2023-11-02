@@ -538,7 +538,7 @@
 				stdout = <0>;		// HD
 				dformat = <2>;		// RGB888
 				dvif = <1>;		// Parallel
-				pixelformat = <8>;	// SRGGB8
+				pixelformat = <9>;	// SRGGB8
 
 				port {
 						grab_ext_0: endpoint {
@@ -560,7 +560,7 @@
 				stdout = <1>;		// SD
 				dformat = <0>;		// YUV422
 				dvif = <0>;		// Serial
-				pixelformat = <2>;	// YUV422P
+				pixelformat = <5>;	// YUV420
 
 				port {
 						grab_ext_1: endpoint {
