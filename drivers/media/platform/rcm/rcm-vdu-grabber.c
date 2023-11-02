@@ -476,9 +476,9 @@ static int set_output_format( struct grb_info *grb ) {
 		grb->out_f.format_dout = 0x06;
 		grb->out_f.color = YCBCR;
 		grb->out_f.y_full_size = pix_fmt->bytesperline;
-		grb->out_f.c_hor_size = pix_fmt->width/4;
-		grb->out_f.c_ver_size = pix_fmt->height;
-		grb->out_f.c_full_size = pix_fmt->bytesperline/4;
+		grb->out_f.c_hor_size = pix_fmt->width/2;
+		grb->out_f.c_ver_size = pix_fmt->height/2;
+		grb->out_f.c_full_size = pix_fmt->bytesperline/2;
 		GRB_DBG_PRINT( "output pixelformat: YCBCR420 three planes\n" );
 		break;
 	case V4L2_PIX_FMT_YUV444M:									// 'YM24'
@@ -2284,6 +2284,8 @@ static int device_probe( struct platform_device *pdev ) {
 	grb->buff_phys_addr = res->start;
 	grb->buff_length = res->end - res->start + 1;
 	grb->buff_dma_addr = (dma_addr_t)(grb->buff_phys_addr - (pdev->dev.dma_pfn_offset << PAGE_SHIFT));
+	grb->buff_cacheable_addr = ioremap_wc(grb->buff_phys_addr, grb->buff_length);
+	printk("Created cached mapping %llx -> %lx \n", grb->buff_phys_addr, grb->buff_cacheable_addr);
 
 	pdev->dma_mask = DMA_BIT_MASK(32);
 	pdev->dev.archdata.dma_offset = 0;
