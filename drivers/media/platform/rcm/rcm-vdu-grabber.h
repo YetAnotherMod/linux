@@ -303,7 +303,6 @@ struct grb_info {
 
 	phys_addr_t buff_phys_addr;
 	dma_addr_t buff_dma_addr;
-	void *buff_cacheable_addr;
 
 	void* kern_virt_addr;
 	u32 mem_offset1, mem_offset2;		// fill set_register

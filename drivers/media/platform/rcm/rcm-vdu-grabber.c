@@ -1056,16 +1056,47 @@ static void return_all_buffers(struct grb_info *grb, enum vb2_buffer_state state
 
 static void grb_try_compose(struct grb_info *, struct v4l2_rect *);
 
+#include <asm/cacheflush.h>
+
+
+static void __dma_sync(void *vaddr, size_t size, int direction)
+{
+	unsigned long start = (unsigned long)vaddr;
+	unsigned long end   = start + size;
+
+	switch (direction) {
+	case DMA_NONE:
+		BUG();
+	case DMA_FROM_DEVICE:
+		/*
+		 * invalidate only when cache-line aligned otherwise there is
+		 * the potential for discarding uncommitted data from the cache
+		 */
+		if ((start | end) & (L1_CACHE_BYTES - 1))
+			flush_dcache_range(start, end);
+		else
+			invalidate_dcache_range(start, end);
+		break;
+	case DMA_TO_DEVICE:		/* writeback only */
+		clean_dcache_range(start, end);
+		break;
+	case DMA_BIDIRECTIONAL:	/* writeback and invalidate */
+		flush_dcache_range(start, end);
+		break;
+	}
+}
+
 static void buffer_finish(struct vb2_buffer *vb)
 {
 	struct grb_info *grb = vb2_get_drv_priv(vb->vb2_queue);
 	struct v4l2_pix_format *pix_fmt = &grb->format.fmt.pix;
 	struct v4l2_rect rect;
+
+
 	void *mem = vb2_plane_vaddr(vb, 0);
 	unsigned long frame_full_size, y_hor_size, y_full_size;
 	unsigned long y_ver_size, origin_size;
 	unsigned long i, j, k;
-
 
 #if 0
 	if (pix_fmt->pixelformat == V4L2_PIX_FMT_NV12)
@@ -1085,6 +1116,11 @@ static void buffer_finish(struct vb2_buffer *vb)
 	grb_try_compose(grb, &rect);
 
 	frame_full_size = vb2_get_plane_payload(vb, 0);
+
+	__dma_sync(mem, frame_full_size, DMA_FROM_DEVICE);
+	//invalidate_dcache_range(mem, frame_full_size);
+
+
 	y_hor_size = grb->out_f.y_hor_size *4;
 	y_full_size = grb->out_f.y_full_size*4;
 	y_ver_size = grb->out_f.y_ver_size;
@@ -1113,7 +1149,8 @@ static void buffer_finish(struct vb2_buffer *vb)
 	}
 
 	vb2_set_plane_payload(vb, 0, y_ver_size*origin_size);
-
+	//__dma_sync(mem, frame_full_size, DMA_TO_DEVICE);
+	//flush_dcache_range(mem, frame_full_size);
 	return;
 }
 
@@ -1224,7 +1261,7 @@ static const struct vb2_ops grb_video_qops = {
 	.start_streaming	= start_streaming,
 	.stop_streaming		= stop_streaming,
 	.wait_prepare		= vb2_ops_wait_prepare,
-	.wait_finish		= vb2_ops_wait_finish,
+	.wait_finish		= vb2_ops_wait_finish,	
 };
 
 static int drv_vidioc_auto_detect( struct grb_info *grb, void *arg );
@@ -2240,6 +2277,104 @@ static int grb_set_default_fmt(struct grb_info *grb, const struct v4l2_pix_forma
 	return 0;
 }
 
+struct dma_coherent_mem {
+	void		*virt_base;
+	dma_addr_t	device_base;
+	unsigned long	pfn_base;
+	int		size;
+	unsigned long	*bitmap;
+	spinlock_t	spinlock;
+	bool		use_dev_dma_pfn_offset;
+};
+
+
+static void dma_release_coherent_memory(struct dma_coherent_mem *mem)
+{
+	if (!mem)
+		return;
+
+	memunmap(mem->virt_base);
+	kfree(mem->bitmap);
+	kfree(mem);
+}
+
+
+static int dma_assign_coherent_memory(struct device *dev,
+				      struct dma_coherent_mem *mem)
+{
+	if (!dev)
+		return -ENODEV;
+
+	if (dev->dma_mem)
+		return -EBUSY;
+
+	dev->dma_mem = mem;
+	return 0;
+}
+
+static int dma_init_coherent_memory(phys_addr_t phys_addr,
+		dma_addr_t device_addr, size_t size,
+		struct dma_coherent_mem **mem)
+{
+	struct dma_coherent_mem *dma_mem = NULL;
+	void *mem_base = NULL;
+	int pages = size >> PAGE_SHIFT;
+	int bitmap_size = BITS_TO_LONGS(pages) * sizeof(long);
+	int ret;
+
+	if (!size) {
+		ret = -EINVAL;
+		goto out;
+	}
+
+	mem_base = memremap(phys_addr, size, MEMREMAP_WB);
+	if (!mem_base) {
+		ret = -EINVAL;
+		goto out;
+	}
+	dma_mem = kzalloc(sizeof(struct dma_coherent_mem), GFP_KERNEL);
+	if (!dma_mem) {
+		ret = -ENOMEM;
+		goto out;
+	}
+	dma_mem->bitmap = kzalloc(bitmap_size, GFP_KERNEL);
+	if (!dma_mem->bitmap) {
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	dma_mem->virt_base = mem_base;
+	dma_mem->device_base = device_addr;
+	dma_mem->pfn_base = PFN_DOWN(phys_addr);
+	dma_mem->size = pages;
+	spin_lock_init(&dma_mem->spinlock);
+
+	*mem = dma_mem;
+	return 0;
+
+out:
+	kfree(dma_mem);
+	if (mem_base)
+		memunmap(mem_base);
+	return ret;
+}
+
+int grb_dma_declare_coherent_memory(struct device *dev, phys_addr_t phys_addr,
+				dma_addr_t device_addr, size_t size)
+{
+	struct dma_coherent_mem *mem;
+	int ret;
+
+	ret = dma_init_coherent_memory(phys_addr, device_addr, size, &mem);
+	if (ret)
+		return ret;
+
+	ret = dma_assign_coherent_memory(dev, mem);
+	if (ret)
+		dma_release_coherent_memory(mem);
+	return ret;
+}
+
 static int device_probe( struct platform_device *pdev ) {
 	int irq;
 	struct grb_info *grb;
@@ -2285,13 +2420,12 @@ static int device_probe( struct platform_device *pdev ) {
 	grb->buff_phys_addr = res->start;
 	grb->buff_length = res->end - res->start + 1;
 	grb->buff_dma_addr = (dma_addr_t)(grb->buff_phys_addr - (pdev->dev.dma_pfn_offset << PAGE_SHIFT));
-	grb->buff_cacheable_addr = ioremap_wc(grb->buff_phys_addr, grb->buff_length);
-	printk("Created cached mapping %llx -> %lx \n", grb->buff_phys_addr, grb->buff_cacheable_addr);
 
 	pdev->dma_mask = DMA_BIT_MASK(32);
 	pdev->dev.archdata.dma_offset = 0;
 
-	err = dma_declare_coherent_memory( &pdev->dev, grb->buff_phys_addr, grb->buff_phys_addr, grb->buff_length );
+
+	err = grb_dma_declare_coherent_memory( &pdev->dev, grb->buff_phys_addr, grb->buff_phys_addr, grb->buff_length );
 	if( err ) {
 		dev_err( &pdev->dev, "declare coherent memory %d\n" , err );
 		goto err_free_mutex;
