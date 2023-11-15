@@ -124,7 +124,7 @@
 //#define MCLK_ENABLE
 
 static const struct v4l2_mbus_framefmt tc358748_def_sink_fmt = {
-	.width		= (640/3)*3 + 640%3, // X_rx = X_tx * 3 = 214 * 3 = 642 ?
+	.width		= (640/3)*3 + 640%3, // X_rx = X_tx * 3 = 640 * 3 = 1920 ?
 	.height		= 480,
 	.code		= MEDIA_BUS_FMT_SRGGB8_1X8,
 	.field		= V4L2_FIELD_NONE,
@@ -135,7 +135,7 @@ static const struct v4l2_mbus_framefmt tc358748_def_sink_fmt = {
 };
 
 static const struct v4l2_mbus_framefmt tc358748_def_source_fmt = {
-	.width		= (640 + 2) / 3, // X_tx = (((640 + 2)/3 + 1)/2)*2 = 214 ?
+	.width		= (640 + 2) / 3, // X_tx = (((1920 + 2)/3 + 3)/4)*4 = 640 ?
 	.height		= 480,
 	.code		= MEDIA_BUS_FMT_RGB888_1X24,
 	.field		= V4L2_FIELD_NONE,
@@ -234,7 +234,7 @@ enum {
 };
 
 /* Check tc358748_mbus_par_code() if you add new formats */
-static const struct tc358748_format tc358748_formats[] = {	
+static const struct tc358748_format tc358748_formats[] = {
 	{ // 0
 		.code = MEDIA_BUS_FMT_SBGGR8_1X8,
 		.bus_width = 8,
@@ -371,12 +371,12 @@ static inline struct tc358748_dev *clk_hw_to_tc358748(struct clk_hw *hw)
 #endif // MCLK_ENABLE
 
 static inline void fsleep(unsigned long usecs)
-{       
+{
         if (usecs <= 10)
                 udelay(usecs);
         else if (usecs <= 20000)
                 usleep_range(usecs, 2 * usecs);
-        else 
+        else
                 msleep(DIV_ROUND_UP(usecs, 1000));
 }
 
@@ -432,9 +432,9 @@ static int tc358748_write(struct tc358748_dev *bridge, u16 reg, u32 val)
 
 	dev_dbg(&client->dev, "TC358748 W: addr(0x%x), reg%d (0x%x), val%d (0x%x).\n",
 		client->addr, 2, reg, 2, val);
-			
+
 	return 0;
-}               
+}
 
 static int tc358748_update_bits(struct tc358748_dev *bridge, u32 reg, u32 mask, u32 val)
 {
@@ -567,7 +567,7 @@ static int tc358748_detect(struct tc358748_dev *bridge)
 
 	chipid = FIELD_GET(CHIPID, val);
 	revid = FIELD_GET(REVID, val);
-	
+
 	if (chipid != 0x44) {
 		dev_err(bridge->sd.dev, "Invalid Chip ID 0x%02x\n", chipid);
 		return -ENODEV;
@@ -680,7 +680,7 @@ static int tc358748_find_pll_settings(struct tc358748_dev *bridge, struct v4l2_s
 //	sink_fmt = tc358748_get_format_by_code(TC358748_SINK, bridge->sink_fmt.code);
 //	source_fmt = tc358748_get_format_by_code(TC358748_SOURCE, bridge->source_fmt.code);
 
-#if 0	
+#if 0
 	if (csi_rate > (((72*sourse_fmt->bus_width) / (2*csi_lanes)) * HZ_PER_MHZ))
 		return -EINVAL;
 
@@ -1300,7 +1300,15 @@ static int tc358748_set_fmt(struct v4l2_subdev *sd,
 	struct v4l2_subdev *remote = tc358748_get_remote_sd(sd);
 	int ret = 0;
 
-	if (format->pad >= TC358748_NR_PADS)
+	if (format->pad == TC358748_SOURCE) {
+		mutex_lock(&bridge->lock);
+		tc358748_set_fmt_source(sd, cfg, format);
+		mutex_unlock(&bridge->lock);
+
+		return ret;
+	}
+
+	if (format->pad != TC358748_SINK)
 		return -EINVAL;
 
 	if (!remote)
@@ -1308,16 +1316,11 @@ static int tc358748_set_fmt(struct v4l2_subdev *sd,
 
 	format->format.code = tc358748_mbus_csi_code(format->format.code);
 
-	if ((format->pad == TC358748_SINK) && ((ret = v4l2_subdev_call(remote, pad, set_fmt, cfg, format)) != 0))
+	if ((ret = v4l2_subdev_call(remote, pad, set_fmt, cfg, format)) != 0)
 		return ret;
 
 	mutex_lock(&bridge->lock);
-
-	if (format->pad == TC358748_SOURCE)
-		tc358748_set_fmt_source(sd, cfg, format);
-	else
-		tc358748_set_fmt_sink(sd, cfg, format);
-
+	tc358748_set_fmt_sink(sd, cfg, format);
 	mutex_unlock(&bridge->lock);
 
 	return ret;
@@ -1350,6 +1353,16 @@ static int tc358748_g_dv_timings(struct v4l2_subdev *sd,
 	return v4l2_subdev_call(remote, video, g_dv_timings, timings);
 }
 
+static int tc358748_interval(struct v4l2_subdev *sd, struct v4l2_subdev_frame_interval *interval)
+{
+	struct v4l2_subdev *remote = tc358748_get_remote_sd(sd);
+	if (!remote)
+		return -ENODEV;
+
+	return v4l2_subdev_call(remote, video, g_frame_interval, interval);
+}
+
+
 //static int tc358748_s_ctrl(struct v4l2_ctrl *ctrl)
 //{
 //	return 0;
@@ -1375,6 +1388,8 @@ static const struct v4l2_subdev_core_ops tc358748_core_ops = {
 static const struct v4l2_subdev_video_ops tc358748_video_ops = {
 	.s_stream = tc358748_s_stream,
 	.g_dv_timings = tc358748_g_dv_timings,
+	.g_frame_interval = tc358748_interval,
+	.s_frame_interval = tc358748_interval,
 };
 
 static const struct v4l2_subdev_pad_ops tc358748_pad_ops = {

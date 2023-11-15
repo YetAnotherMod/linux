@@ -560,7 +560,7 @@
 				stdout = <1>;		// SD
 				dformat = <0>;		// YUV422
 				dvif = <0>;		// Serial
-				pixelformat = <5>;	// YUV420
+				pixelformat = <2>;	// YUV422
 
 				port {
 						grab_ext_1: endpoint {

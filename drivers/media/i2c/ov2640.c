@@ -1081,6 +1081,20 @@ static int ov2640_s_stream(struct v4l2_subdev *sd, int on)
 	return ret;
 }
 
+static int ov2640_interval(struct v4l2_subdev *sd, struct v4l2_subdev_frame_interval *fi)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	struct ov2640_priv *priv = to_ov2640(client);
+
+	mutex_lock(&priv->lock);
+	fi->pad = 0;
+	fi->interval.numerator = 1;
+	fi->interval.denominator = 36000000/(2*1922*1282); // clk_get_rate(priv->clk) / (2 * priv->win->width * priv->win->height);
+	mutex_unlock(&priv->lock);
+
+	return 0;
+}
+
 static int ov2640_video_probe(struct i2c_client *client)
 {
 	struct ov2640_priv *priv = to_ov2640(client);
@@ -1146,6 +1160,8 @@ static const struct v4l2_subdev_pad_ops ov2640_subdev_pad_ops = {
 
 static const struct v4l2_subdev_video_ops ov2640_subdev_video_ops = {
 	.s_stream = ov2640_s_stream,
+	.g_frame_interval = ov2640_interval,
+	.s_frame_interval = ov2640_interval,
 };
 
 static const struct v4l2_subdev_ops ov2640_subdev_ops = {

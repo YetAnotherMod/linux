@@ -303,10 +303,11 @@ struct grb_info {
 
 	phys_addr_t buff_phys_addr;
 	dma_addr_t buff_dma_addr;
+	dma_addr_t trash_dma_addr;
 
 	void* kern_virt_addr;
 	u32 mem_offset1, mem_offset2;		// fill set_register
-	u32 buff_length;					// fiil buf_setup
+	u32 buff_length;
 };
 
 #define notifier_to_grb(n) container_of(n, struct grb_info, notifier)

@@ -484,6 +484,7 @@ struct imx219 {
 
 	/* Current mode */
 	const struct imx219_mode *mode;
+	unsigned int vts_cur;
 
 	/*
 	 * Mutex for serialized access:
@@ -698,9 +699,10 @@ static int imx219_set_ctrl(struct v4l2_ctrl *ctrl)
 				       imx219->vflip->val << 1);
 		break;
 	case V4L2_CID_VBLANK:
+		imx219->vts_cur = imx219->mode->height + ctrl->val;
 		ret = imx219_write_reg(imx219, IMX219_REG_VTS,
 				       IMX219_REG_VALUE_16BIT,
-				       imx219->mode->height + ctrl->val);
+				       imx219->vts_cur);
 		break;
 	case V4L2_CID_TEST_PATTERN_RED:
 		ret = imx219_write_reg(imx219, IMX219_REG_TESTP_RED,
@@ -862,6 +864,7 @@ static int imx219_set_pad_format(struct v4l2_subdev *sd,
 		   imx219->fmt.code != fmt->format.code) {
 		imx219->fmt = fmt->format;
 		imx219->mode = mode;
+		imx219->vts_cur = mode->vts_def;
 		/* Update limits and set FPS to default */
 		__v4l2_ctrl_modify_range(imx219->vblank, IMX219_VBLANK_MIN,
 					 IMX219_VTS_MAX - mode->height, 1,
@@ -1199,6 +1202,41 @@ static int imx219_identify_module(struct imx219 *imx219)
 	return 0;
 }
 
+static int imx219_get_interval(struct v4l2_subdev *sd, struct v4l2_subdev_frame_interval *fi)
+{
+        struct imx219 *imx219 = to_imx219(sd);
+
+	mutex_lock(&imx219->mutex);
+	fi->pad = 0;
+	fi->interval.numerator = 1;
+	fi->interval.denominator = IMX219_PIXEL_RATE / (IMX219_HTOTAL_CON * imx219->vts_cur);
+	mutex_unlock(&imx219->mutex);
+
+	return 0;
+}
+
+static int imx219_enum_frame_interval(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config *cfg,
+				struct v4l2_subdev_frame_interval_enum *fie)
+{
+	struct imx219 *imx219 = to_imx219(sd);
+	const struct imx219_mode *mode;
+
+	if (fie->index != 0)
+		return -EINVAL;
+
+	mode = v4l2_find_nearest_size(supported_modes,
+				ARRAY_SIZE(supported_modes), width, height,
+				fie->width, fie->height);
+
+	fie->code = imx219_get_format_code(imx219, MEDIA_BUS_FMT_SRGGB8_1X8);
+	fie->width = mode->width;
+	fie->height = mode->height;
+	fie->interval.numerator = 1;
+	fie->interval.denominator =  IMX219_PIXEL_RATE / (IMX219_HTOTAL_CON * mode->vts_def);
+
+	return 0;
+}
+
 static const struct v4l2_subdev_core_ops imx219_core_ops = {
 	.subscribe_event = v4l2_ctrl_subdev_subscribe_event,
 	.unsubscribe_event = v4l2_event_subdev_unsubscribe,
@@ -1206,6 +1244,8 @@ static const struct v4l2_subdev_core_ops imx219_core_ops = {
 
 static const struct v4l2_subdev_video_ops imx219_video_ops = {
 	.s_stream = imx219_set_stream,
+	.g_frame_interval = imx219_get_interval,
+	.s_frame_interval = imx219_get_interval,
 };
 
 static const struct v4l2_subdev_pad_ops imx219_pad_ops = {
@@ -1214,6 +1254,7 @@ static const struct v4l2_subdev_pad_ops imx219_pad_ops = {
 	.set_fmt = imx219_set_pad_format,
 	.get_selection = imx219_get_selection,
 	.enum_frame_size = imx219_enum_frame_size,
+	.enum_frame_interval = imx219_enum_frame_interval,
 };
 
 static const struct v4l2_subdev_ops imx219_subdev_ops = {
@@ -1451,6 +1492,7 @@ static int imx219_probe(struct i2c_client *client)
 
 	/* Set default mode to max resolution */
 	imx219->mode = &supported_modes[IMX219_DEFAULT_FORMAT_INDX];
+	imx219->vts_cur = imx219->mode->vts_def;
 
 	/* sensor doesn't enter LP-11 state upon power up until and unless
 	 * streaming is started, so upon power up switch the modes to:
@@ -1498,7 +1540,7 @@ static int imx219_probe(struct i2c_client *client)
 	}
 	else
 		dev_info(dev, "register sensor sub-device '%s'\n", imx219->sd.name);
-		
+
 	/* Enable runtime PM and turn off the device */
 	pm_runtime_set_active(dev);
 	pm_runtime_enable(dev);
