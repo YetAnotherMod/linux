@@ -133,7 +133,7 @@ static const struct grb_pix_map grb_pix_map_list[] = {
 	/* RGB formats */
 	{ // 0
 		.code = MEDIA_BUS_FMT_ARGB8888_1X32, // without alpha, HW add 
-		.pixelformat = V4L2_PIX_FMT_BGR32,
+		.pixelformat = V4L2_PIX_FMT_ABGR32,
 		.bpp = 4,
 		.fmt_default = 1,
 	},
@@ -428,7 +428,7 @@ static int set_output_format( struct grb_info *grb ) {
 	grb->out_f.y_ver_size = pix_fmt->height;
 
 	switch( pix_fmt->pixelformat ) {
-	case V4L2_PIX_FMT_BGR32:									// 'BGR4'
+	case V4L2_PIX_FMT_ABGR32:									// 'AR24'
 	case V4L2_PIX_FMT_SBGGR8:
 	case V4L2_PIX_FMT_SGRBG8:
 	case V4L2_PIX_FMT_SGBRG8:
@@ -440,7 +440,7 @@ static int set_output_format( struct grb_info *grb ) {
 		grb->out_f.c_ver_size = pix_fmt->height;
 		grb->out_f.c_full_size = pix_fmt->bytesperline/4;
 
-		if (pix_fmt->pixelformat != V4L2_PIX_FMT_BGR32) {
+		if (pix_fmt->pixelformat != V4L2_PIX_FMT_ABGR32) {
 			grb->out_f.y_hor_size = ((grb->out_f.y_hor_size + 2)/3 + 1) & ~1;
 			grb->out_f.c_hor_size = ((grb->out_f.c_hor_size + 2)/3 + 1) & ~1;
 
@@ -683,7 +683,7 @@ static void convert_rect_params(struct grb_info *grb, struct v4l2_rect *tmp, str
 		cur->width = cur->width + ((16 - (cur->width & 0xF)) & 0xF);
 		cur->left = cur->left - (cur->left & 0xF);
 		break;
-	case V4L2_PIX_FMT_BGR32:
+	case V4L2_PIX_FMT_ABGR32:
 		cur->width = cur->width + ((2 - (cur->left & 0x1)) & 0x1);
 		cur->left = cur->left - (cur->left & 0x1);
 		break;
@@ -1162,7 +1162,7 @@ static void buffer_finish(struct vb2_buffer *vb)
 		return;
 	}
 
-	if (pix_fmt->pixelformat == V4L2_PIX_FMT_BGR32) {
+	if (pix_fmt->pixelformat == V4L2_PIX_FMT_ABGR32) {
 		y_full_size = grb->out_f.y_full_size * grb->out_f.y_ver_size * 4;
 
 		if (y_full_size < frame_full_size)
@@ -1439,7 +1439,7 @@ static int vidioc_fmt( struct grb_info *grb, struct v4l2_format *f ) {
 			f->fmt.pix.bytesperline = ((((f->fmt.pix.width + 2)/3)*4 + 7) >> 3) << 3;
 			f->fmt.pix.sizeimage = f->fmt.pix.bytesperline * f->fmt.pix.height;
 			break;
-		case V4L2_PIX_FMT_BGR32:
+		case V4L2_PIX_FMT_ABGR32:
 			f->fmt.pix.bytesperline = (((f->fmt.pix.width + 1) >> 1) << 1) * 4;
 			f->fmt.pix.sizeimage    = f->fmt.pix.bytesperline*f->fmt.pix.height;
 			break;
@@ -1478,10 +1478,10 @@ static int vidioc_enum_fmt_vid_cap_grb( struct file *file, void *fh, struct v4l2
 		return -EINVAL;
 
 	switch( fmt->index ) {
-	case 0: // V4L2_PIX_FMT_BGR32
+	case 0: // V4L2_PIX_FMT_ABGR32
 		fmt->flags = 0;
-		strlcpy( fmt->description, "ARGB8888 one plane", sizeof(fmt->description) );
-		fmt->pixelformat = v4l2_fourcc( 'B','G','R', '4' );
+		strlcpy( fmt->description, "BGRA8888 one plane", sizeof(fmt->description) );
+		fmt->pixelformat = v4l2_fourcc( 'R','A','2', '4' );
 		break;
 	case 1: // V4L2_PIX_FMT_RGB24
 		fmt->flags = 0;
@@ -1617,7 +1617,7 @@ static int grb_try_fmt(struct grb_info *grb, struct v4l2_format *f, u32 *code)
 		pixfmt->bytesperline = ((((pixfmt->width + 2)/3)*4 + 7) >> 3) << 3;
 		pixfmt->sizeimage = pixfmt->bytesperline * pixfmt->height;
 		break;
-	case V4L2_PIX_FMT_BGR32:
+	case V4L2_PIX_FMT_ABGR32:
 		pixfmt->bytesperline = (((pixfmt->width + 1) >> 1) << 1) * 4;
 		pixfmt->sizeimage    = pixfmt->bytesperline*pixfmt->height;
 		break;
