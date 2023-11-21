@@ -272,7 +272,7 @@
 			i2c0: i2c@0x3C05A000 {
 				status = "ok";
 
-				rtc@0b {
+				rtc@b {
 					status = "okay";
 					compatible = "dallas,ds1374";
 					reg = <0x0b>;
@@ -338,7 +338,7 @@
 						};
 					};
 				};
-				
+
 				imx219: sensor@10 {
 					status = "okay";
 					compatible = "sony,imx219";
@@ -584,6 +584,7 @@
 				status = "ok";
 				compatible = "simple-audio-card";
 				simple-audio-card,name = "RCM Audio";
+				simple-audio-card,convert-rate = <48000>;
 				#address-cells = <1>;
 				#size-cells = <0>;
 				#sound-dai-cells = <0>;
