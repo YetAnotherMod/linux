@@ -10,6 +10,7 @@
  */
 
 /include/ "1888tx018.dtsi"
+#include <dt-bindings/interrupt-controller/irq.h>
 
 / {
 	model = "rcm,1888tx018";
@@ -78,7 +79,7 @@
 			regulator-type = "voltage";
 			regulator-min-microvolt = <5000000>;
 			regulator-max-microvolt = <5000000>;
-			enable-active-low;
+			enable-active-high;
 			regulator-always-on;
 			startup-delay-us = <0>;
 			vin-supply = <&vsys_5v>;
@@ -93,7 +94,7 @@
 			regulator-type = "voltage";
 			regulator-min-microvolt = <5000000>;
 			regulator-max-microvolt = <5000000>;
-			enable-active-low;
+			enable-active-high;
 			regulator-always-on;
 			startup-delay-us = <1000000>;
 			vin-supply = <&vsys_5v>;
@@ -108,7 +109,7 @@
 			regulator-type = "voltage";
 			regulator-min-microvolt = <5000000>;
 			regulator-max-microvolt = <5000000>;
-			enable-active-low;
+			enable-active-high;
 			regulator-always-on;
 			startup-delay-us = <2000000>;
 			vin-supply = <&vsys_5v>;
@@ -271,6 +272,12 @@
 			i2c0: i2c@0x3C05A000 {
 				status = "ok";
 
+				rtc@0b {
+					status = "okay";
+					compatible = "dallas,ds1374";
+					reg = <0x0b>;
+				};
+
 				hdmi@39 {
 					status = "okay";
 					compatible = "adi,adv7513";
@@ -324,13 +331,14 @@
 						ov2640_0: endpoint {
 							remote-endpoint = <&grab_ext_1>;
 							bus-type = <5>; /* PARALLEL */
-					        bus-width = <8>;
+						bus-width = <8>;
 							vsync-active = <1>;
 							hsync-active = <1>;
 							pclk-sample = <1>;
 						};
 					};
 				};
+				
 				imx219: sensor@10 {
 					status = "okay";
 					compatible = "sony,imx219";
@@ -442,8 +450,6 @@
 
 			gpio1: gpio1@0x3C066000 {
 				status = "ok";
-//				gpio-line-names = "SYS_BOOT8", "CARD_DETECT", "HDMI_PD", "USB_VBUS_EN1",
-//								  "USB_VBUS_EN2", "USB_VBUS_EN0", "PCIE_M2_RSTn0", "PCIE_M2_RSTn1";
 				gpio-line-names = "USB_VBUS_EN2", "CARD_DETECT", "HDMI_PD", "HDMI_INT",
 								  "USB_VBUS_EN1", "USB_VBUS_EN0", "PCIE_M2_RSTn0", "PCIE_M2_RSTn1";
 			};
@@ -642,14 +648,8 @@
 				status = "ok";
 				//       freq       fb pre post cpudiv tmrdiv
 				freqs = <266667     64  1   1    2      7>,
-				        <400000     64  1   1    1      7>,
+					<400000     64  1   1    1      7>,
 						<800000     64  1   1    0      7>;
-
-//				freqs = <100000     32  1   2    1      7>,
-//						<200000     32  1   1    1      7>,
-//						<400000     32  1   1    0      7>,
-//						<600000     48  1   1    0      7>,
-//						<800000     64  1   1    0      7>;
 
 				/* 50 us (>1000 clocks at refclk/prediv) */
 				transition-latency = <50000>; 
