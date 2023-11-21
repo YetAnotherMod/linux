@@ -131,7 +131,7 @@
 				/* GRETH_GBIT1 -> GMII */
 				<&lsif0_mgpio9_greth_gbit1_gmii>,
 				<&lsif0_mgpio10_greth_gbit1_gmii>;
-				
+
 		};
 
 		lsif0 {
@@ -264,6 +264,118 @@
 								  "VIN1_RST[mgpio6-2]", "        [mgpio6-3]",
 								  "        [mgpio6-4]", "        [mgpio6-5]",
 								  "        [mgpio6-6]", "        [mgpio6-7]";
+			};
+
+			pwm0: pwm@0 {
+				status = "ok";
+				#pwm-cells = <3>;
+				compatible = "pwm-gpio";
+				pwm-gpio = <&gpio_mgpio1 7 0>;
+			};
+
+			pwm1: pwm@1 {
+				status = "ok";
+				#pwm-cells = <3>;
+				compatible = "pwm-gpio";
+				pwm-gpio = <&gpio_mgpio1 1 0>;
+			};
+
+			pwm2: pwm@2 {
+				status = "ok";
+				#pwm-cells = <3>;
+				compatible = "pwm-gpio";
+				pwm-gpio = <&gpio_mgpio1 3 0>;
+			};
+
+			pwm3: pwm@3 {
+				status = "ok";
+				#pwm-cells = <3>;
+				compatible = "pwm-gpio";
+				pwm-gpio = <&gpio_mgpio1 6 0>;
+			};
+
+			pwm4: pwm@4 {
+				status = "ok";
+				#pwm-cells = <3>;
+				compatible = "pwm-gpio";
+				pwm-gpio = <&gpio_mgpio0 6 0>;
+			};
+
+			pwm5: pwm@5 {
+				status = "ok";
+				#pwm-cells = <3>;
+				compatible = "pwm-gpio";
+				pwm-gpio = <&gpio_mgpio1 2 0>;
+			};
+
+			pwm6: pwm@6 {
+				status = "ok";
+				#pwm-cells = <3>;
+				compatible = "pwm-gpio";
+				pwm-gpio = <&gpio_mgpio2 1 0>;
+			};
+
+			pwm7: pwm@7 {
+				status = "ok";
+				#pwm-cells = <3>;
+				compatible = "pwm-gpio";
+				pwm-gpio = <&gpio_mgpio2 2 0>;
+			};
+
+			pwm8: pwm@8 {
+				status = "ok";
+				#pwm-cells = <3>;
+				compatible = "pwm-gpio";
+				pwm-gpio = <&gpio_mgpio3 0 0>;
+			};
+
+			pwm9: pwm@9 {
+				status = "ok";
+				#pwm-cells = <3>;
+				compatible = "pwm-gpio";
+				pwm-gpio = <&gpio_mgpio2 0 0>;
+			};
+
+			pwm10: pwm@10 {
+				status = "ok";
+				#pwm-cells = <3>;
+				compatible = "pwm-gpio";
+				pwm-gpio = <&gpio_mgpio2 4 0>;
+			};
+
+			pwm11: pwm@11 {
+				status = "ok";
+				#pwm-cells = <3>;
+				compatible = "pwm-gpio";
+				pwm-gpio = <&gpio_mgpio2 3 0>;
+			};
+
+			pwm12: pwm@12 {
+				status = "ok";
+				#pwm-cells = <3>;
+				compatible = "pwm-gpio";
+				pwm-gpio = <&gpio_mgpio2 5 0>;
+			};
+
+			pwm13: pwm@13 {
+				status = "ok";
+				#pwm-cells = <3>;
+				compatible = "pwm-gpio";
+				pwm-gpio = <&gpio_mgpio3 3 0>;
+			};
+
+			pwm14: pwm@14 {
+				status = "ok";
+				#pwm-cells = <3>;
+				compatible = "pwm-gpio";
+				pwm-gpio = <&gpio_mgpio3 2 0>;
+			};
+
+			pwm15: pwm@15 {
+				status = "ok";
+				#pwm-cells = <3>;
+				compatible = "pwm-gpio";
+				pwm-gpio = <&gpio_mgpio2 6 0>;
 			};
 
 		};
@@ -650,10 +762,10 @@
 				//       freq       fb pre post cpudiv tmrdiv
 				freqs = <266667     64  1   1    2      7>,
 					<400000     64  1   1    1      7>,
-						<800000     64  1   1    0      7>;
+					<800000     64  1   1    0      7>;
 
 				/* 50 us (>1000 clocks at refclk/prediv) */
-				transition-latency = <50000>; 
+				transition-latency = <50000>;
 			};
 
 		};
@@ -712,4 +824,5 @@
 	chosen {
 		stdout-path = &uart0;
 	};
+
 };
