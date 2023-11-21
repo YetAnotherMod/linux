@@ -526,11 +526,11 @@
 
                         i2c1: i2c@0x3C05B000 {
                                status = "ok";
-			}
+			};
 
                         i2c2: i2c@0x3C05C000 {
                                status = "ok";
-			}
+			};
 
 			uart0: uart0@3C05D000 {
 				status = "ok";
@@ -562,7 +562,7 @@
 				num-cs = <1>;
 				cs-gpios = <&gpio1 2 0>;
 
-                                spidev0: spidev@0 {
+                                spidev1: spidev@0 {
                                         status = "okay";
                                         compatible = "linux,spidev";
                                         spi-max-frequency = <25000000>;
