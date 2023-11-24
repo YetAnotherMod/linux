@@ -1125,16 +1125,6 @@
 				reg = <0x38000000 0x1000>;
 			};
 
-			timer0: timer@0x38001000 {
-				status = "ok";
-				compatible = "arm,sp804", "arm,primecell";
-				reg = <0x38001000 0x1000>;
-				interrupts = <34 0>, <35 0>;
-				interrupt-parent = <&MPIC>;
-				clocks =  <&apb_sys_pclk>;
-				clock-names = "apb_pclk";
-			};
-
 			timer: timer@0x38001000 {
 				status = "disabled";
 				compatible = "arm,sp804", "arm,primecell";
