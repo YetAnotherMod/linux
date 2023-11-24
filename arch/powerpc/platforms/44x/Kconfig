@@ -199,8 +199,6 @@ config 1888TX018
 	select ARM_TIMER_SP804
 	select HAVE_DMA_CONTIGUOUS
 	select ZONE_DMA
-	select GENERIC_SCHED_CLOCK
-	select ARM_TIMER_SP804
 	help
 	  This option enables support for the RCM 1888TX018 SoC
 
