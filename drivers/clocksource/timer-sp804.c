@@ -277,7 +277,7 @@ static int __init sp804_of_init(struct device_node *np)
 			goto err;
 	}
 
-	initialized = true
+	initialized = true;
 
 	return 0;
 err:
