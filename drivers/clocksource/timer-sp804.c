@@ -293,7 +293,6 @@ static int __init integrator_cp_of_init(struct device_node *np)
 	int irq, ret = -EINVAL;
 	const char *name = of_get_property(np, "compatible", NULL);
 	struct clk *clk;
-	printk(KERN_ERR "-------> INTEG INIT \n");
 
 	base = of_iomap(np, 0);
 	if (!base) {
