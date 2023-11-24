@@ -761,6 +761,10 @@
 
 		apb0 {
 
+			timer: timer@0x38001000 {
+				status = "ok";
+			};
+
 			watchdog: watchdog@0x38002000 {
 				status = "ok";
 			};

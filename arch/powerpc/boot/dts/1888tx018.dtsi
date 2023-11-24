@@ -1131,8 +1131,18 @@
 				reg = <0x38001000 0x1000>;
 				interrupts = <34 0>, <35 0>;
 				interrupt-parent = <&MPIC>;
-				clocks =  <&pclk>;
-				clock-names = "timer0", "timer1", "apb_pclk";
+				clocks =  <&apb_sys_pclk>;
+				clock-names = "apb_pclk";
+			};
+
+			timer: timer@0x38001000 {
+				status = "disabled";
+				compatible = "arm,sp804", "arm,primecell";
+				reg = <0x38001000 0x1000>;
+				interrupts = <34 0>, <35 0>;
+				interrupt-parent = <&MPIC>;
+				clocks = <&apb_sys_pclk>;
+				clock-names = "apb_pclk";
 			};
 
 			watchdog: watchdog@0x38002000 {

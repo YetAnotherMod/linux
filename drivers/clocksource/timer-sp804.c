@@ -254,21 +254,30 @@ static int __init sp804_of_init(struct device_node *np)
 		if (ret)
 			goto err;
 
+#ifdef CONFIG_1888TX018
+		ret = __sp804_clocksource_and_sched_clock_init(base, name, clk1, 0);
+#else
 		ret = __sp804_clocksource_and_sched_clock_init(base, name, clk1, 1);
+#endif
 		if (ret)
 			goto err;
 	} else {
-
 		ret = __sp804_clockevents_init(base, irq, clk1 , name);
 		if (ret)
 			goto err;
 
+#ifdef CONFIG_1888TX018
+		ret = __sp804_clocksource_and_sched_clock_init(base + TIMER_2_BASE,
+							       name, clk2, 0);
+#else
 		ret =__sp804_clocksource_and_sched_clock_init(base + TIMER_2_BASE,
 							      name, clk2, 1);
+#endif
 		if (ret)
 			goto err;
 	}
-	initialized = true;
+
+	initialized = true
 
 	return 0;
 err:
@@ -284,6 +293,7 @@ static int __init integrator_cp_of_init(struct device_node *np)
 	int irq, ret = -EINVAL;
 	const char *name = of_get_property(np, "compatible", NULL);
 	struct clk *clk;
+	printk(KERN_ERR "-------> INTEG INIT \n");
 
 	base = of_iomap(np, 0);
 	if (!base) {

@@ -196,8 +196,11 @@ config 1888TX018
 	select NOT_COHERENT_CACHE
 	select DEFAULT_UIMAGE
 	select PPC_UDBG_PL011
+	select ARM_TIMER_SP804
 	select HAVE_DMA_CONTIGUOUS
 	select ZONE_DMA
+	select GENERIC_SCHED_CLOCK
+	select ARM_TIMER_SP804
 	help
 	  This option enables support for the RCM 1888TX018 SoC
 

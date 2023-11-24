@@ -20,6 +20,7 @@
 #include <linux/init.h>
 #include <linux/of.h>
 #include <linux/of_platform.h>
+#include <linux/clocksource.h>
 #include <linux/rtc.h>
 
 #include <asm/machdep.h>
@@ -118,6 +119,10 @@ static int __init ppc47x_device_probe(void)
 	i2c_add_driver(&avr_driver);
 #endif
 	of_platform_bus_probe(NULL, ppc47x_of_bus, NULL);
+
+#if IS_ENABLED(CONFIG_1888TX018)
+	timer_probe();
+#endif
 
 	return 0;
 }
